@@ -5,7 +5,12 @@
   ],
   "accounts": [
     {
-      "mobile": "18218019118",
+      "email": "cjackhwang@gmail.com",
+      "password": "tetr5354",
+      "token": ""
+    },
+    {
+      "email": "cjackhwang@outlook.com",
       "password": "tetr5354",
       "token": ""
     }
