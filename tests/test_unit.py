@@ -390,23 +390,30 @@ class TestStreamParsing(unittest.TestCase):
         self.assertFalse(bool(content))
 
     def test_response_started_flag(self):
-        """测试 response_started 标志逻辑"""
+        """测试 response_started 标志逻辑 - 只有 RESPONSE 类型才触发"""
         response_started = False
         thinking_enabled = True
         
-        # 模拟处理流程
+        # 模拟处理流程 - 修复后的逻辑
         chunks = [
             {"v": "思考中..."},  # thinking (before response)
-            {"p": "response/fragments", "v": [{"content": "回复"}]},  # response starts
-            {"v": "继续回复"},  # text (after response started)
+            {"p": "response/fragments", "v": [{"type": "THINK", "content": "思考"}]},  # THINK 不触发 response_started
+            {"v": "继续思考..."},  # 仍然是 thinking
+            {"p": "response/fragments", "v": [{"type": "RESPONSE", "content": "回复"}]},  # RESPONSE 触发
+            {"v": "正式回复"},  # text (after response started)
         ]
         
         results = []
         for chunk in chunks:
             chunk_path = chunk.get("p", "")
+            v_value = chunk.get("v")
             
-            if "response/fragments" in chunk_path:
-                response_started = True
+            # 只有当 fragments 包含 RESPONSE 类型时才设置 response_started
+            if "response/fragments" in chunk_path and isinstance(v_value, list):
+                for frag in v_value:
+                    if isinstance(frag, dict) and frag.get("type", "").upper() == "RESPONSE":
+                        response_started = True
+                        break
             
             if not chunk_path:
                 if thinking_enabled and not response_started:
@@ -419,8 +426,29 @@ class TestStreamParsing(unittest.TestCase):
             results.append((ptype, response_started))
         
         self.assertEqual(results[0], ("thinking", False))  # 第一个是 thinking
-        self.assertEqual(results[1], ("text", True))       # response/fragments 后
-        self.assertEqual(results[2], ("text", True))       # 之后都是 text
+        self.assertEqual(results[1], ("text", False))      # THINK fragment 不触发 response_started
+        self.assertEqual(results[2], ("thinking", False))  # THINK 之后仍是 thinking
+        self.assertEqual(results[3], ("text", True))       # RESPONSE fragment 触发
+        self.assertEqual(results[4], ("text", True))       # 之后是 text
+
+    def test_think_vs_response_fragment_types(self):
+        """测试 THINK 和 RESPONSE fragment 类型的区分"""
+        # 模拟 DeepSeek 的 fragments 数据
+        think_fragment = {"p": "response/fragments", "v": [{"id": 1, "type": "THINK", "content": "嗯"}]}
+        response_fragment = {"p": "response/fragments", "v": [{"id": 2, "type": "RESPONSE", "content": "你好"}]}
+        
+        def check_response_started(chunk):
+            """检查是否应该设置 response_started"""
+            chunk_path = chunk.get("p", "")
+            v_value = chunk.get("v")
+            if "response/fragments" in chunk_path and isinstance(v_value, list):
+                for frag in v_value:
+                    if isinstance(frag, dict) and frag.get("type", "").upper() == "RESPONSE":
+                        return True
+            return False
+        
+        self.assertFalse(check_response_started(think_fragment))   # THINK 不触发
+        self.assertTrue(check_response_started(response_fragment))  # RESPONSE 触发
 
 
 if __name__ == "__main__":
