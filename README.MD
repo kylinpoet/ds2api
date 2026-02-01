@@ -3,78 +3,100 @@
 [![License](https://img.shields.io/github/license/CJackHwang/ds2api.svg)](LICENSE)
 ![Stars](https://img.shields.io/github/stars/CJackHwang/ds2api.svg)
 ![Forks](https://img.shields.io/github/forks/CJackHwang/ds2api.svg)
+[![Version](https://img.shields.io/badge/version-1.6.11-blue.svg)](version.txt)
 
-将 DeepSeek 网页版转换为 OpenAI 兼容 API，支持多账号轮询、自动 Token 刷新、可视化管理界面。
+将 DeepSeek 免费对话版转换为 **OpenAI & Claude 兼容 API**，支持多账号轮询、自动 Token 刷新、可视化管理界面。
 
 ## ✨ 特性
 
-- 🚀 **OpenAI 兼容** - 完全兼容 OpenAI API 格式，无缝接入现有应用
-- 🔄 **多账号轮询** - Round-Robin 负载均衡，支持高并发
+- 🔄 **双协议兼容** - 同时支持 OpenAI 和 Claude (Anthropic) API 格式
+- 🚀 **多账号轮询** - Round-Robin 负载均衡，支持高并发场景
 - 🔐 **Token 自动刷新** - 过期自动重新登录，无需手动维护
-- 🌐 **WebUI 管理** - 可视化添加账号、测试 API、同步 Vercel
-- 🔍 **联网搜索** - 支持 DeepSeek 搜索增强模式
-- 🧠 **深度思考** - 支持 R1 推理模式
-- ☁️ **Vercel 部署** - 一键部署，无需服务器
+- 🌐 **WebUI 管理** - 可视化添加账号、测试 API、同步 Vercel 配置
+- 🔍 **联网搜索** - 支持 DeepSeek 原生搜索增强模式
+- 🧠 **深度思考** - 支持推理模式，输出思考过程
+- 🛠️ **工具调用** - 兼容 OpenAI Function Calling 格式
+- ☁️ **Vercel 一键部署** - 无需服务器，快速上线
 
 ## 📋 模型支持
 
+### OpenAI 兼容接口 (`/v1/chat/completions`)
+
+| 模型 | 深度思考 | 联网搜索 | 说明 |
+|-----|:--------:|:--------:|------|
+| `deepseek-chat` | ❌ | ❌ | 标准对话模式 |
+| `deepseek-reasoner` | ✅ | ❌ | 推理模式（输出思考过程） |
+| `deepseek-chat-search` | ❌ | ✅ | 联网搜索模式 |
+| `deepseek-reasoner-search` | ✅ | ✅ | 推理 + 联网搜索 |
+
+### Claude 兼容接口 (`/anthropic/v1/messages`)
+
 | 模型 | 说明 |
 |-----|------|
-| `deepseek-chat` | DeepSeek V3.2 非推理模式 |
-| `deepseek-reasoner` | DeepSeek V3.2 推理模式（深度思考） |
-| `deepseek-chat-search` | 非推理 + 联网搜索 |
-| `deepseek-reasoner-search` | 推理 + 联网搜索 |
+| `claude-sonnet-4-20250514` | 映射到 deepseek-chat（标准模式） |
+| `claude-sonnet-4-20250514-fast` | 映射到 deepseek-chat（快速模式） |
+| `claude-sonnet-4-20250514-slow` | 映射到 deepseek-reasoner（推理模式） |
+
+> **提示**：Claude 接口实际调用的是 DeepSeek，响应格式会自动转换为 Anthropic 标准格式。
 
 ## 🚀 快速开始
 
-### Vercel 部署（推荐）
+### 方式一：Vercel 部署（推荐）
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api&env=DS2API_ADMIN_KEY&envDescription=管理面板访问密码（必填）&envLink=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api%23环境变量&project-name=ds2api&repository-name=ds2api)
 
-1. 点击上方按钮，填写管理密码 `DS2API_ADMIN_KEY`
+1. 点击上方按钮，设置管理密码 `DS2API_ADMIN_KEY`
 2. 部署完成后访问 `/admin` 管理界面
-3. 添加 DeepSeek 账号和 API Key
+3. 添加 DeepSeek 账号和自定义 API Key
 4. 点击「同步到 Vercel」保存配置
 
-> **首次同步会自动验证账号、保存 Token 和 Vercel 凭证，后续操作无需再输入。**
+> **首次同步会自动验证账号并保存 Token，后续操作无需重复输入凭证。**
 
-### 本地运行
+### 方式二：本地开发
 
 ```bash
-# 克隆仓库
+# 1. 克隆仓库
 git clone https://github.com/CJackHwang/ds2api.git
 cd ds2api
 
-# 安装依赖
+# 2. 安装依赖
 pip install -r requirements.txt
 
-# 配置
+# 3. 配置账号
 cp config.example.json config.json
-# 编辑 config.json 添加账号
+# 编辑 config.json，添加 DeepSeek 账号信息
 
-# 运行
+# 4. 启动服务
 python dev.py
 ```
+
+服务启动后访问 `http://localhost:5001`
 
 ## ⚙️ 配置说明
 
 ### 环境变量
 
-| 变量 | 说明 | 是否必填 |
-|-----|------|---------|
-| `DS2API_ADMIN_KEY` | WebUI 管理密码 | Vercel 必填 |
-| `DS2API_CONFIG_JSON` | 配置 JSON（支持 Base64） | 可选 |
-| `VERCEL_TOKEN` | Vercel API Token（用于快捷同步） | 可选 |
+| 变量 | 说明 | 必填 |
+|-----|------|:----:|
+| `DS2API_ADMIN_KEY` | 管理面板密码 | Vercel 必填 |
+| `DS2API_CONFIG_JSON` | 配置 JSON 或 Base64 编码 | 可选 |
+| `VERCEL_TOKEN` | Vercel API Token（用于同步） | 可选 |
 | `VERCEL_PROJECT_ID` | Vercel 项目 ID | 可选 |
+| `PORT` | 服务端口（默认 5001） | 可选 |
 
-### 配置文件格式
+### 配置文件格式 (`config.json`)
 
 ```json
 {
-  "keys": ["your-api-key"],
+  "keys": ["your-api-key-1", "your-api-key-2"],
   "accounts": [
     {
-      "email": "your@email.com",
+      "email": "user@example.com",
+      "password": "your-password",
+      "token": ""
+    },
+    {
+      "mobile": "12345678901",
       "password": "your-password",
       "token": ""
     }
@@ -82,41 +104,79 @@ python dev.py
 }
 ```
 
-## 📡 API 接口
+> **说明**：
+> - `keys`: 自定义的 API 密钥，用于调用本服务
+> - `accounts`: DeepSeek 网页版账号，支持邮箱或手机号登录
+> - `token`: 留空即可，系统会自动获取并刷新
 
-完整的 API 文档请参阅 **[API.md](API.md)**。
+## 📡 API 使用
+
+完整 API 文档请参阅 **[API.md](API.md)**
 
 ### 快速示例
 
-**模型列表**：
-```
-GET /v1/models
+**获取模型列表**：
+```bash
+curl http://localhost:5001/v1/models
 ```
 
-**对话补全**：
+**OpenAI 格式调用**：
 ```bash
-curl https://your-domain.com/v1/chat/completions \
+curl http://localhost:5001/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"你好"}]}'
+  -d '{
+    "model": "deepseek-chat",
+    "messages": [{"role": "user", "content": "你好"}],
+    "stream": true
+  }'
 ```
 
-### 管理接口
+**Claude 格式调用**：
+```bash
+curl http://localhost:5001/anthropic/v1/messages \
+  -H "x-api-key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "你好"}]
+  }'
+```
 
-| 接口 | 说明 |
-|-----|------|
-| `GET /admin` | 管理界面 |
-| `GET /admin/config` | 获取配置 |
-| `POST /admin/accounts/test` | 测试单个账号 |
-| `POST /admin/accounts/test-all` | 批量测试账号 |
-| `POST /admin/vercel/sync` | 同步到 Vercel |
+### Python SDK 使用
 
-## 🔧 Nginx 反代配置
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://localhost:5001/v1"
+)
+
+response = client.chat.completions.create(
+    model="deepseek-reasoner",
+    messages=[{"role": "user", "content": "请解释量子纠缠"}],
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+## 🔧 部署配置
+
+### Nginx 反向代理
 
 ```nginx
 location / {
     proxy_pass http://localhost:5001;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
     proxy_buffering off;
+    proxy_cache off;
     chunked_transfer_encoding on;
     tcp_nopush on;
     tcp_nodelay on;
@@ -124,18 +184,31 @@ location / {
 }
 ```
 
+### Docker 部署（可选）
+
+```bash
+# 使用环境变量配置
+docker run -d \
+  -p 5001:5001 \
+  -e DS2API_ADMIN_KEY=your-admin-key \
+  -e DS2API_CONFIG_JSON='{"keys":["api-key"],"accounts":[...]}' \
+  ds2api
+```
+
 ## ⚠️ 免责声明
 
-**逆向 API 不稳定，建议前往 [DeepSeek 官方](https://platform.deepseek.com/) 付费使用 API。**
+**本项目基于逆向工程实现，服务稳定性无法保证。**
 
-**本项目仅供学习交流，禁止商用或对外提供服务，风险自担！**
+- 仅供学习研究使用，**禁止商业用途或对外提供服务**
+- 建议正式项目使用 [DeepSeek 官方 API](https://platform.deepseek.com/)
+- 使用本项目产生的任何风险由用户自行承担
 
 ## 📜 鸣谢
 
-本项目基于以下开源项目并进行了大量修改：
+本项目基于以下开源项目：
 
-- [iidamie/deepseek2api](https://github.com/iidamie/deepseek2api) - 二开版本
-- [LLM-Red-Team/deepseek-free-api](https://github.com/LLM-Red-Team/deepseek-free-api) - 早期原始项目
+- [iidamie/deepseek2api](https://github.com/iidamie/deepseek2api)
+- [LLM-Red-Team/deepseek-free-api](https://github.com/LLM-Red-Team/deepseek-free-api)
 
 ## 📊 Star History
 

@@ -1,0 +1,319 @@
+# DS2API 部署指南
+
+本文档详细介绍 DS2API 的各种部署方式。
+
+---
+
+## 目录
+
+- [Vercel 部署（推荐）](#vercel-部署推荐)
+- [本地开发](#本地开发)
+- [生产环境部署](#生产环境部署)
+- [常见问题](#常见问题)
+
+---
+
+## Vercel 部署（推荐）
+
+### 一键部署
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api&env=DS2API_ADMIN_KEY&envDescription=管理面板访问密码（必填）&envLink=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api%23环境变量&project-name=ds2api&repository-name=ds2api)
+
+### 部署步骤
+
+1. **点击部署按钮**
+   - 登录你的 GitHub 账号
+   - 授权 Vercel 访问
+
+2. **设置环境变量**
+   - `DS2API_ADMIN_KEY`: 管理面板密码（**必填**）
+
+3. **等待部署完成**
+   - Vercel 会自动构建并部署项目
+   - 部署完成后获得访问 URL
+
+4. **配置账号**
+   - 访问 `https://your-project.vercel.app/admin`
+   - 输入管理密码登录
+   - 添加 DeepSeek 账号
+   - 设置自定义 API Key
+
+5. **同步配置**
+   - 点击「同步到 Vercel」按钮
+   - 首次需要输入 Vercel Token 和 Project ID
+   - 同步成功后配置会持久化
+
+### 获取 Vercel 凭证
+
+**Vercel Token**:
+1. 访问 https://vercel.com/account/tokens
+2. 点击 "Create Token"
+3. 设置名称和有效期
+4. 复制生成的 Token
+
+**Project ID**:
+1. 进入 Vercel 项目页面
+2. 点击 Settings -> General
+3. 复制 "Project ID"
+
+---
+
+## 本地开发
+
+### 环境要求
+
+- Python 3.9+
+- Node.js 18+ (WebUI 开发)
+- pip
+
+### 快速开始
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/CJackHwang/ds2api.git
+cd ds2api
+
+# 2. 安装 Python 依赖
+pip install -r requirements.txt
+
+# 3. 配置账号
+cp config.example.json config.json
+# 编辑 config.json，填入 DeepSeek 账号信息
+
+# 4. 启动服务
+python dev.py
+```
+
+### 配置文件示例
+
+```json
+{
+  "keys": ["my-api-key-1", "my-api-key-2"],
+  "accounts": [
+    {
+      "email": "your-email@example.com",
+      "password": "your-password",
+      "token": ""
+    },
+    {
+      "mobile": "12345678901",
+      "password": "your-password",
+      "token": ""
+    }
+  ]
+}
+```
+
+**说明**：
+- `keys`: 自定义 API Key，用于调用本服务的接口
+- `accounts`: DeepSeek 网页版账号
+  - 支持 `email` 或 `mobile` 登录
+  - `token` 留空，系统会自动获取
+
+### WebUI 开发
+
+```bash
+# 进入 WebUI 目录
+cd webui
+
+# 安装依赖
+npm install
+
+# 启动开发服务器
+npm run dev
+```
+
+WebUI 开发服务器会启动在 `http://localhost:5173`，并自动代理 API 请求到后端 `http://localhost:5001`。
+
+---
+
+## 生产环境部署
+
+### 使用 systemd (Linux)
+
+1. **创建服务文件**
+
+```bash
+sudo nano /etc/systemd/system/ds2api.service
+```
+
+```ini
+[Unit]
+Description=DS2API Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/ds2api
+ExecStart=/usr/bin/python3 app.py
+Restart=always
+RestartSec=10
+Environment=PORT=5001
+Environment=DS2API_ADMIN_KEY=your-admin-key
+
+[Install]
+WantedBy=multi-user.target
+```
+
+2. **启动服务**
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable ds2api
+sudo systemctl start ds2api
+```
+
+3. **查看状态**
+
+```bash
+sudo systemctl status ds2api
+sudo journalctl -u ds2api -f
+```
+
+### Nginx 反向代理
+
+```nginx
+server {
+    listen 80;
+    server_name api.yourdomain.com;
+
+    # SSL 配置（推荐）
+    # listen 443 ssl http2;
+    # ssl_certificate /path/to/cert.pem;
+    # ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_http_version 1.1;
+        
+        # 关闭缓冲，支持 SSE
+        proxy_buffering off;
+        proxy_cache off;
+        
+        # 连接设置
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # SSE 超时设置
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        
+        # 分块传输
+        chunked_transfer_encoding on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 120;
+    }
+}
+```
+
+### Docker 部署（可选）
+
+```dockerfile
+# Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5001
+CMD ["python", "app.py"]
+```
+
+```bash
+# 构建镜像
+docker build -t ds2api .
+
+# 运行容器
+docker run -d \
+  --name ds2api \
+  -p 5001:5001 \
+  -e DS2API_ADMIN_KEY=your-admin-key \
+  -e DS2API_CONFIG_JSON='{"keys":["api-key"],"accounts":[...]}' \
+  ds2api
+```
+
+### Docker Compose
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  ds2api:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      - DS2API_ADMIN_KEY=${DS2API_ADMIN_KEY}
+      - DS2API_CONFIG_JSON=${DS2API_CONFIG_JSON}
+    restart: unless-stopped
+```
+
+---
+
+## 常见问题
+
+### Q: 账号验证失败怎么办？
+
+**A**: 检查以下几点：
+1. 确认 DeepSeek 账号密码正确
+2. 检查账号是否被封禁或需要验证
+3. 尝试在浏览器中手动登录一次
+4. 查看日志获取详细错误信息
+
+### Q: 流式响应断开怎么办？
+
+**A**: 
+1. 检查 Nginx/反向代理配置，确保关闭了 `proxy_buffering`
+2. 增加 `proxy_read_timeout` 超时时间
+3. 检查网络连接稳定性
+
+### Q: Vercel 部署后配置丢失？
+
+**A**: 
+1. 确保点击了「同步到 Vercel」按钮
+2. 检查 Vercel Token 是否正确且未过期
+3. 确认 Project ID 正确
+
+### Q: 如何更新到新版本？
+
+**本地部署**:
+```bash
+git pull origin main
+pip install -r requirements.txt
+# 重启服务
+```
+
+**Vercel 部署**:
+- 项目会自动从 GitHub 同步更新
+- 或在 Vercel 控制台手动触发重新部署
+
+### Q: 如何查看日志？
+
+**本地开发**:
+```bash
+# 设置日志级别
+export LOG_LEVEL=DEBUG
+python dev.py
+```
+
+**Vercel**:
+- 访问 Vercel 控制台 -> 项目 -> Deployments -> Logs
+
+### Q: Token 计数不准确？
+
+**A**: DS2API 使用估算方式计算 token 数量（字符数 / 4），与 OpenAI 官方的 tokenizer 可能有差异，仅供参考。
+
+---
+
+## 获取帮助
+
+- **GitHub Issues**: https://github.com/CJackHwang/ds2api/issues
+- **文档**: https://github.com/CJackHwang/ds2api
