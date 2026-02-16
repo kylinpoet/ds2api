@@ -810,7 +810,7 @@ func processToolSieveChunk(state *toolStreamSieveState, chunk string, toolNames 
 			continue
 		}
 
-		safe, hold := splitSafeContent(pending, 64)
+		safe, hold := splitSafeContentForToolDetection(pending)
 		if safe == "" {
 			break
 		}
@@ -842,15 +842,38 @@ func flushToolSieve(state *toolStreamSieveState, toolNames []string) []toolStrea
 	return events
 }
 
-func splitSafeContent(s string, holdRunes int) (safe, hold string) {
-	if s == "" || holdRunes <= 0 {
+func splitSafeContentForToolDetection(s string) (safe, hold string) {
+	if s == "" {
+		return "", ""
+	}
+	suspiciousStart := findSuspiciousPrefixStart(s)
+	if suspiciousStart < 0 {
 		return s, ""
 	}
+	if suspiciousStart > 0 {
+		return s[:suspiciousStart], s[suspiciousStart:]
+	}
 	runes := []rune(s)
-	if len(runes) <= holdRunes {
+	const maxHold = 128
+	if len(runes) <= maxHold {
 		return "", s
 	}
-	return string(runes[:len(runes)-holdRunes]), string(runes[len(runes)-holdRunes:])
+	return string(runes[:len(runes)-maxHold]), string(runes[len(runes)-maxHold:])
+}
+
+func findSuspiciousPrefixStart(s string) int {
+	start := -1
+	indices := []int{
+		strings.LastIndex(s, "{"),
+		strings.LastIndex(s, "["),
+		strings.LastIndex(s, "```"),
+	}
+	for _, idx := range indices {
+		if idx > start {
+			start = idx
+		}
+	}
+	return start
 }
 
 func findToolSegmentStart(s string) int {

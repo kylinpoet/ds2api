@@ -751,7 +751,7 @@ function processToolSieveChunk(state, chunk, toolNames) {
       continue;
     }
 
-    const [safe, hold] = splitSafeContent(state.pending, 64);
+    const [safe, hold] = splitSafeContentForToolDetection(state.pending);
     if (!safe) {
       break;
     }
@@ -791,12 +791,35 @@ function flushToolSieve(state, toolNames) {
   return events;
 }
 
-function splitSafeContent(s, holdChars) {
-  const chars = Array.from(s || '');
-  if (chars.length <= holdChars) {
-    return ['', s];
+function splitSafeContentForToolDetection(s) {
+  const text = s || '';
+  if (!text) {
+    return ['', ''];
   }
-  return [chars.slice(0, chars.length - holdChars).join(''), chars.slice(chars.length - holdChars).join('')];
+  const suspiciousStart = findSuspiciousPrefixStart(text);
+  if (suspiciousStart < 0) {
+    return [text, ''];
+  }
+  if (suspiciousStart > 0) {
+    return [text.slice(0, suspiciousStart), text.slice(suspiciousStart)];
+  }
+  const chars = Array.from(text);
+  const maxHold = 128;
+  if (chars.length <= maxHold) {
+    return ['', text];
+  }
+  return [chars.slice(0, chars.length - maxHold).join(''), chars.slice(chars.length - maxHold).join('')];
+}
+
+function findSuspiciousPrefixStart(s) {
+  let start = -1;
+  for (const needle of ['{', '[', '```']) {
+    const idx = s.lastIndexOf(needle);
+    if (idx > start) {
+      start = idx;
+    }
+  }
+  return start;
 }
 
 function findToolSegmentStart(s) {
