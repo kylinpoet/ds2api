@@ -62,6 +62,7 @@ docker-compose up -d --build
 
 - serverless 入口：`api/index.go`
 - 路由与缓存头：`vercel.json`
+- 已移除 legacy `builds` 字段，避免 `unused-build-settings` 警告
 
 至少配置环境变量：
 
@@ -83,6 +84,15 @@ docker-compose up -d --build
 - `/healthz`
 - `/v1/models`
 - `/admin`
+
+## 3.1 GitHub Release 自动构建
+
+仓库包含 `.github/workflows/release-artifacts.yml`：
+
+- 仅在 Release `published` 时触发
+- 不在 `push` 时触发
+- 自动构建 Linux/macOS/Windows 二进制包并上传到 Release Assets
+- 生成 `sha256sums.txt` 供校验
 
 ## 4. 反向代理（Nginx）
 

@@ -62,6 +62,7 @@ Notes:
 
 - Serverless entry: `api/index.go`
 - Rewrites and cache headers: `vercel.json`
+- Legacy `builds` has been removed to avoid the `unused-build-settings` warning
 
 Minimum environment variables:
 
@@ -83,6 +84,15 @@ After deploy, verify:
 - `/healthz`
 - `/v1/models`
 - `/admin`
+
+## 3.1 GitHub Release Automation
+
+This repo includes `.github/workflows/release-artifacts.yml`:
+
+- Triggers only on Release `published`
+- Does not run on `push`
+- Builds Linux/macOS/Windows archives and uploads them to Release Assets
+- Generates `sha256sums.txt` for integrity checks
 
 ## 4. Reverse Proxy (Nginx)
 

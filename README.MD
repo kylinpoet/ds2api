@@ -89,6 +89,38 @@ docker-compose logs -f
 - `DS2API_ADMIN_KEY`
 - `DS2API_CONFIG_JSON`（JSON 字符串或 Base64）
 
+说明：`vercel.json` 已移除 legacy `builds` 配置，避免部署时出现
+`unused-build-settings` 警告，并使用当前推荐的函数路由模式。
+
+## Release 自动构建产物（GitHub Actions）
+
+仓库内置工作流：`.github/workflows/release-artifacts.yml`
+
+- 触发条件：仅在 GitHub Release `published` 时触发
+- 不会在普通 `push` 时构建
+- 构建内容：多平台二进制包（Linux/macOS/Windows）+ `sha256sums.txt`
+- 每个压缩包包含：
+- `ds2api` 可执行文件（Windows 为 `ds2api.exe`）
+- `static/admin`（WebUI 构建产物）
+- `sha3_wasm_bg.7b9ca65ddd.wasm`
+- `config.example.json`、`.env.example`
+- `README.MD`、`README.en.md`、`LICENSE`
+
+维护者发布步骤：
+
+1. 在 GitHub 创建并发布 Release（带 tag，如 `v1.7.0`）
+2. 等待 Actions 工作流 `Release Artifacts` 完成
+3. 在 Release 的 Assets 下载对应平台压缩包
+
+下载后运行示例（Linux/macOS）：
+
+```bash
+tar -xzf ds2api_v1.7.0_linux_amd64.tar.gz
+cd ds2api_v1.7.0_linux_amd64
+cp config.example.json config.json
+./ds2api
+```
+
 ## 配置说明
 
 ### `config.json` 示例

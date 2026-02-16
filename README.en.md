@@ -89,6 +89,38 @@ docker-compose logs -f
 - `DS2API_ADMIN_KEY`
 - `DS2API_CONFIG_JSON` (raw JSON or Base64)
 
+Note: legacy `builds` has been removed from `vercel.json` to avoid
+the `unused-build-settings` warning and to follow the current function routing model.
+
+## Release Artifact Automation (GitHub Actions)
+
+Built-in workflow: `.github/workflows/release-artifacts.yml`
+
+- Trigger: only when a GitHub Release is `published`
+- No build on normal `push`
+- Outputs: multi-platform binaries (Linux/macOS/Windows) + `sha256sums.txt`
+- Each archive includes:
+- `ds2api` executable (`ds2api.exe` on Windows)
+- `static/admin` (built WebUI assets)
+- `sha3_wasm_bg.7b9ca65ddd.wasm`
+- `config.example.json`, `.env.example`
+- `README.MD`, `README.en.md`, `LICENSE`
+
+Maintainer release flow:
+
+1. Create and publish a GitHub Release (with tag, e.g. `v1.7.0`)
+2. Wait for the `Release Artifacts` workflow to finish
+3. Download the matching archive from Release Assets
+
+Run from downloaded archive (Linux/macOS):
+
+```bash
+tar -xzf ds2api_v1.7.0_linux_amd64.tar.gz
+cd ds2api_v1.7.0_linux_amd64
+cp config.example.json config.json
+./ds2api
+```
+
 ## Configuration
 
 ### `config.json` example
