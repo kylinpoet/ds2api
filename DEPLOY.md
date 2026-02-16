@@ -79,8 +79,11 @@ docker-compose up -d --build
 - `VERCEL_TEAM_ID`
 - `DS2API_ACCOUNT_MAX_INFLIGHT`（每账号并发上限，默认 `2`）
 - `DS2API_ACCOUNT_CONCURRENCY`（同上别名）
+- `DS2API_ACCOUNT_MAX_QUEUE`（等待队列上限，默认=`recommended_concurrency`）
+- `DS2API_ACCOUNT_QUEUE_SIZE`（同上别名）
 
 并发建议值会动态按 `账号数量 × 每账号并发上限` 计算（默认即 `账号数量 × 2`）。
+当 in-flight 满时，请求先进入等待队列；默认队列上限等于建议并发值，因此默认 429 阈值约为 `账号数量 × 4`。
 
 说明：
 - 仓库不提交 `static/admin` 构建产物

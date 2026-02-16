@@ -156,6 +156,8 @@ cp config.example.json config.json
 | `LOG_LEVEL` | `DEBUG/INFO/WARN/ERROR` |
 | `DS2API_ACCOUNT_MAX_INFLIGHT` | Max in-flight requests per managed account, default `2` |
 | `DS2API_ACCOUNT_CONCURRENCY` | Alias of the same setting (legacy compatibility) |
+| `DS2API_ACCOUNT_MAX_QUEUE` | Waiting queue limit (managed-key mode), default=`recommended_concurrency` |
+| `DS2API_ACCOUNT_QUEUE_SIZE` | Alias of the same setting (legacy compatibility) |
 | `DS2API_ADMIN_KEY` | Admin login key, default `admin` |
 | `DS2API_JWT_SECRET` | Admin JWT signing secret (optional) |
 | `DS2API_JWT_EXPIRE_HOURS` | Admin JWT TTL in hours, default `24` |
@@ -181,8 +183,12 @@ Optional header: `X-Ds2-Target-Account` to pin one managed account.
 
 - DS2API computes recommended concurrency dynamically as: `account_count * per_account_inflight_limit`
 - Default per-account inflight limit is `2`, so default recommendation is `account_count * 2`
+- When inflight slots are full, requests enter a waiting queue instead of immediate 429
+- Default queue limit equals `recommended_concurrency`, so default 429 threshold is about `account_count * 4`
+- 429 is returned only after total load exceeds `inflight + waiting` capacity
 - You can override per-account inflight via `DS2API_ACCOUNT_MAX_INFLIGHT` (or `DS2API_ACCOUNT_CONCURRENCY`)
-- `GET /admin/queue/status` returns both `max_inflight_per_account` and `recommended_concurrency`
+- You can override waiting queue size via `DS2API_ACCOUNT_MAX_QUEUE` (or `DS2API_ACCOUNT_QUEUE_SIZE`)
+- `GET /admin/queue/status` returns `max_inflight_per_account`, `recommended_concurrency`, `waiting`, and `max_queue_size`
 
 ## Tool Call Adaptation
 

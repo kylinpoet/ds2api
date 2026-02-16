@@ -79,8 +79,11 @@ Optional:
 - `VERCEL_TEAM_ID`
 - `DS2API_ACCOUNT_MAX_INFLIGHT` (per-account inflight limit, default `2`)
 - `DS2API_ACCOUNT_CONCURRENCY` (alias of the same setting)
+- `DS2API_ACCOUNT_MAX_QUEUE` (waiting queue limit, default=`recommended_concurrency`)
+- `DS2API_ACCOUNT_QUEUE_SIZE` (alias of the same setting)
 
 Recommended concurrency is computed dynamically as `account_count * per_account_inflight_limit` (default is `account_count * 2`).
+When inflight slots are full, requests are queued first; with default queue size, 429 typically starts around `account_count * 4`.
 
 Notes:
 - `static/admin` build output is not committed

@@ -156,6 +156,8 @@ cp config.example.json config.json
 | `LOG_LEVEL` | 日志级别：`DEBUG/INFO/WARN/ERROR` |
 | `DS2API_ACCOUNT_MAX_INFLIGHT` | 每个账号最大并发 in-flight 请求数，默认 `2` |
 | `DS2API_ACCOUNT_CONCURRENCY` | 同上别名（兼容旧写法） |
+| `DS2API_ACCOUNT_MAX_QUEUE` | 等待队列上限，默认等于 `recommended_concurrency` |
+| `DS2API_ACCOUNT_QUEUE_SIZE` | 同上别名（兼容旧写法） |
 | `DS2API_ADMIN_KEY` | Admin 登录密钥，默认 `admin` |
 | `DS2API_JWT_SECRET` | Admin JWT 签名密钥（可选） |
 | `DS2API_JWT_EXPIRE_HOURS` | Admin JWT 过期小时数，默认 `24` |
@@ -181,8 +183,12 @@ cp config.example.json config.json
 
 - 系统建议并发值按账号池动态计算：`账号数量 × 每账号并发上限`
 - 默认每账号并发上限是 `2`，因此默认建议值是 `账号数量 × 2`
+- 当 in-flight 槽位满时，请求会进入等待队列，不会立即 429
+- 默认等待队列上限 = `recommended_concurrency`，因此默认总承载上限是 `账号数量 × 4`
+- 超过总承载上限（in-flight + waiting）才返回 `429`
 - 可通过 `DS2API_ACCOUNT_MAX_INFLIGHT`（或 `DS2API_ACCOUNT_CONCURRENCY`）手动覆盖每账号并发上限
-- `GET /admin/queue/status` 会返回 `max_inflight_per_account` 与 `recommended_concurrency`
+- 可通过 `DS2API_ACCOUNT_MAX_QUEUE`（或 `DS2API_ACCOUNT_QUEUE_SIZE`）手动覆盖等待队列上限
+- `GET /admin/queue/status` 会返回 `max_inflight_per_account`、`recommended_concurrency`、`waiting`、`max_queue_size`
 
 ## Tool Call 适配说明
 
