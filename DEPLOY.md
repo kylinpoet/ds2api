@@ -150,6 +150,12 @@ No Output Directory named "public" found after the Build completed.
 
 若你在项目设置里手动改过 Output Directory，请同步改为 `static` 或清空让仓库配置生效。
 
+若接口返回 Vercel 的 HTML 页面 `Authentication Required`（而不是 JSON），说明被 Vercel Deployment Protection 拦截：
+
+- 关闭该部署/环境的 Protection（推荐用于公开 API）
+- 或给请求加 `x-vercel-protection-bypass`
+- 若仅是 Vercel 内部 Node->Go 调用被拦截，可设置 `VERCEL_AUTOMATION_BYPASS_SECRET`（或 `DS2API_VERCEL_PROTECTION_BYPASS`）
+
 Vercel 流式说明（重要）：
 
 - Vercel 的 Go Runtime 存在平台层响应缓冲，因此本项目在 Vercel 上采用“Go prepare + Node stream”的混合链路来恢复实时 SSE。

@@ -152,6 +152,12 @@ Vercel is validating frontend output against `public`. This repo builds WebUI in
 
 If you manually changed Output Directory in Project Settings, set it to `static` (or clear it and let repo config apply).
 
+If API responses return Vercel HTML `Authentication Required` (instead of JSON), the request is blocked by Vercel Deployment Protection:
+
+- Disable protection for that deployment/environment (recommended for public API use)
+- Or send `x-vercel-protection-bypass` in requests
+- If only internal Node->Go calls are blocked, set `VERCEL_AUTOMATION_BYPASS_SECRET` (or `DS2API_VERCEL_PROTECTION_BYPASS`)
+
 Vercel streaming note (important):
 
 - Vercel Go Runtime applies platform-level buffering, so this repo uses a hybrid path on Vercel (`Go prepare + Node stream`) to restore real-time SSE behavior.

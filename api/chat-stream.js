@@ -205,7 +205,10 @@ function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, X-Ds2-Target-Account');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-API-Key, X-Ds2-Target-Account, X-Vercel-Protection-Bypass',
+  );
 }
 
 function header(req, key) {
@@ -238,6 +241,10 @@ async function fetchStreamPrepare(req, rawBody) {
   const url = new URL(`${proto}://${host}${req.url || '/v1/chat/completions'}`);
   url.searchParams.set('__go', '1');
   url.searchParams.set('__stream_prepare', '1');
+  const protectionBypass = resolveProtectionBypass(req);
+  if (protectionBypass) {
+    url.searchParams.set('x-vercel-protection-bypass', protectionBypass);
+  }
 
   const upstream = await fetch(url.toString(), {
     method: 'POST',
@@ -246,6 +253,7 @@ async function fetchStreamPrepare(req, rawBody) {
       'x-api-key': asString(header(req, 'x-api-key')),
       'x-ds2-target-account': asString(header(req, 'x-ds2-target-account')),
       'x-ds2-internal-token': internalSecret(),
+      'x-vercel-protection-bypass': protectionBypass,
       'content-type': asString(header(req, 'content-type')) || 'application/json',
     },
     body: rawBody,
@@ -269,6 +277,14 @@ async function fetchStreamPrepare(req, rawBody) {
 }
 
 function relayPreparedFailure(res, prep) {
+  if (prep.status === 401 && looksLikeVercelAuthPage(prep.text)) {
+    writeOpenAIError(
+      res,
+      401,
+      'Vercel Deployment Protection blocked internal prepare request. Disable protection for this deployment or set VERCEL_AUTOMATION_BYPASS_SECRET.',
+    );
+    return;
+  }
   res.statusCode = prep.status || 500;
   res.setHeader('Content-Type', prep.contentType || 'application/json');
   if (prep.text) {
@@ -292,6 +308,22 @@ async function safeReadText(resp) {
 
 function internalSecret() {
   return asString(process.env.DS2API_VERCEL_INTERNAL_SECRET) || asString(process.env.DS2API_ADMIN_KEY) || 'admin';
+}
+
+function resolveProtectionBypass(req) {
+  const fromHeader = asString(header(req, 'x-vercel-protection-bypass'));
+  if (fromHeader) {
+    return fromHeader;
+  }
+  return asString(process.env.VERCEL_AUTOMATION_BYPASS_SECRET) || asString(process.env.DS2API_VERCEL_PROTECTION_BYPASS);
+}
+
+function looksLikeVercelAuthPage(text) {
+  const body = asString(text).toLowerCase();
+  if (!body) {
+    return false;
+  }
+  return body.includes('authentication required') && body.includes('vercel');
 }
 
 function parseChunkForContent(chunk, thinkingEnabled, currentType) {
@@ -472,6 +504,10 @@ async function proxyToGo(req, res, rawBody) {
   const host = asString(header(req, 'host'));
   const url = new URL(`${proto}://${host}${req.url || '/v1/chat/completions'}`);
   url.searchParams.set('__go', '1');
+  const protectionBypass = resolveProtectionBypass(req);
+  if (protectionBypass) {
+    url.searchParams.set('x-vercel-protection-bypass', protectionBypass);
+  }
 
   const upstream = await fetch(url.toString(), {
     method: 'POST',
@@ -479,6 +515,7 @@ async function proxyToGo(req, res, rawBody) {
       authorization: asString(header(req, 'authorization')),
       'x-api-key': asString(header(req, 'x-api-key')),
       'x-ds2-target-account': asString(header(req, 'x-ds2-target-account')),
+      'x-vercel-protection-bypass': protectionBypass,
       'content-type': asString(header(req, 'content-type')) || 'application/json',
     },
     body: rawBody,
