@@ -86,12 +86,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages := normalizeMessages(messagesRaw)
-	toolNames := []string{}
-	if tools, ok := req["tools"].([]any); ok && len(tools) > 0 {
-		messages, toolNames = injectToolPrompt(messages, tools)
-	}
-	finalPrompt := util.MessagesPrepare(messages)
+	finalPrompt, toolNames := buildOpenAIFinalPrompt(messagesRaw, req["tools"])
 
 	sessionID, err := h.DS.CreateSession(r.Context(), a, 3)
 	if err != nil {
@@ -405,17 +400,6 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request, resp *htt
 	}
 }
 
-func normalizeMessages(raw []any) []map[string]any {
-	out := make([]map[string]any, 0, len(raw))
-	for _, item := range raw {
-		m, ok := item.(map[string]any)
-		if ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
 func injectToolPrompt(messages []map[string]any, tools []any) ([]map[string]any, []string) {
 	toolSchemas := make([]string, 0, len(tools))
 	names := make([]string, 0, len(tools))
@@ -444,7 +428,7 @@ func injectToolPrompt(messages []map[string]any, tools []any) ([]map[string]any,
 	if len(toolSchemas) == 0 {
 		return messages, names
 	}
-	toolPrompt := "You have access to these tools:\n\n" + strings.Join(toolSchemas, "\n\n") + "\n\nWhen you need to use tools, output ONLY this JSON format (no other text):\n{\"tool_calls\": [{\"name\": \"tool_name\", \"input\": {\"param\": \"value\"}}]}\n\nIMPORTANT: If calling tools, output ONLY the JSON. The response must start with { and end with }"
+	toolPrompt := "You have access to these tools:\n\n" + strings.Join(toolSchemas, "\n\n") + "\n\nWhen you need to use tools, output ONLY this JSON format (no other text):\n{\"tool_calls\": [{\"name\": \"tool_name\", \"input\": {\"param\": \"value\"}}]}\n\nIMPORTANT:\n1) If calling tools, output ONLY the JSON. The response must start with { and end with }.\n2) After receiving a tool result, you MUST use it to produce the final answer.\n3) Only call another tool when the previous result is missing required data or returned an error."
 
 	for i := range messages {
 		if messages[i]["role"] == "system" {

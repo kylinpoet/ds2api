@@ -68,11 +68,7 @@ func (h *Handler) handleVercelStreamPrepare(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	messages := normalizeMessages(messagesRaw)
-	if tools, ok := req["tools"].([]any); ok && len(tools) > 0 {
-		messages, _ = injectToolPrompt(messages, tools)
-	}
-	finalPrompt := util.MessagesPrepare(messages)
+	finalPrompt, _ := buildOpenAIFinalPrompt(messagesRaw, req["tools"])
 
 	sessionID, err := h.DS.CreateSession(r.Context(), a, 3)
 	if err != nil {
