@@ -1,0 +1,415 @@
+package config
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+)
+
+var Logger = newLogger()
+
+func newLogger() *slog.Logger {
+	level := new(slog.LevelVar)
+	switch strings.ToUpper(strings.TrimSpace(os.Getenv("LOG_LEVEL"))) {
+	case "DEBUG":
+		level.Set(slog.LevelDebug)
+	case "WARN":
+		level.Set(slog.LevelWarn)
+	case "ERROR":
+		level.Set(slog.LevelError)
+	default:
+		level.Set(slog.LevelInfo)
+	}
+	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	return slog.New(h)
+}
+
+type Account struct {
+	Email    string `json:"email,omitempty"`
+	Mobile   string `json:"mobile,omitempty"`
+	Password string `json:"password,omitempty"`
+	Token    string `json:"token,omitempty"`
+}
+
+func (a Account) Identifier() string {
+	if strings.TrimSpace(a.Email) != "" {
+		return strings.TrimSpace(a.Email)
+	}
+	if strings.TrimSpace(a.Mobile) != "" {
+		return strings.TrimSpace(a.Mobile)
+	}
+	// Backward compatibility: old configs may contain token-only accounts.
+	// Use a stable non-sensitive synthetic id so they can still join the pool.
+	token := strings.TrimSpace(a.Token)
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return "token:" + hex.EncodeToString(sum[:8])
+}
+
+type Config struct {
+	Keys             []string          `json:"keys,omitempty"`
+	Accounts         []Account         `json:"accounts,omitempty"`
+	ClaudeMapping    map[string]string `json:"claude_mapping,omitempty"`
+	ClaudeModelMap   map[string]string `json:"claude_model_mapping,omitempty"`
+	VercelSyncHash   string            `json:"_vercel_sync_hash,omitempty"`
+	VercelSyncTime   int64             `json:"_vercel_sync_time,omitempty"`
+	AdditionalFields map[string]any    `json:"-"`
+}
+
+func (c Config) MarshalJSON() ([]byte, error) {
+	m := map[string]any{}
+	for k, v := range c.AdditionalFields {
+		m[k] = v
+	}
+	if len(c.Keys) > 0 {
+		m["keys"] = c.Keys
+	}
+	if len(c.Accounts) > 0 {
+		m["accounts"] = c.Accounts
+	}
+	if len(c.ClaudeMapping) > 0 {
+		m["claude_mapping"] = c.ClaudeMapping
+	}
+	if len(c.ClaudeModelMap) > 0 {
+		m["claude_model_mapping"] = c.ClaudeModelMap
+	}
+	if c.VercelSyncHash != "" {
+		m["_vercel_sync_hash"] = c.VercelSyncHash
+	}
+	if c.VercelSyncTime != 0 {
+		m["_vercel_sync_time"] = c.VercelSyncTime
+	}
+	return json.Marshal(m)
+}
+
+func (c *Config) UnmarshalJSON(b []byte) error {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	c.AdditionalFields = map[string]any{}
+	for k, v := range raw {
+		switch k {
+		case "keys":
+			_ = json.Unmarshal(v, &c.Keys)
+		case "accounts":
+			_ = json.Unmarshal(v, &c.Accounts)
+		case "claude_mapping":
+			_ = json.Unmarshal(v, &c.ClaudeMapping)
+		case "claude_model_mapping":
+			_ = json.Unmarshal(v, &c.ClaudeModelMap)
+		case "_vercel_sync_hash":
+			_ = json.Unmarshal(v, &c.VercelSyncHash)
+		case "_vercel_sync_time":
+			_ = json.Unmarshal(v, &c.VercelSyncTime)
+		default:
+			var anyVal any
+			if err := json.Unmarshal(v, &anyVal); err == nil {
+				c.AdditionalFields[k] = anyVal
+			}
+		}
+	}
+	return nil
+}
+
+func (c Config) Clone() Config {
+	clone := Config{
+		Keys:             slices.Clone(c.Keys),
+		Accounts:         slices.Clone(c.Accounts),
+		ClaudeMapping:    cloneStringMap(c.ClaudeMapping),
+		ClaudeModelMap:   cloneStringMap(c.ClaudeModelMap),
+		VercelSyncHash:   c.VercelSyncHash,
+		VercelSyncTime:   c.VercelSyncTime,
+		AdditionalFields: map[string]any{},
+	}
+	for k, v := range c.AdditionalFields {
+		clone.AdditionalFields[k] = v
+	}
+	return clone
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+type Store struct {
+	mu      sync.RWMutex
+	cfg     Config
+	path    string
+	fromEnv bool
+	keyMap  map[string]struct{} // O(1) API key lookup index
+	accMap  map[string]int      // O(1) account lookup: identifier -> slice index
+}
+
+func BaseDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
+}
+
+func IsVercel() bool {
+	return strings.TrimSpace(os.Getenv("VERCEL")) != "" || strings.TrimSpace(os.Getenv("NOW_REGION")) != ""
+}
+
+func ResolvePath(envKey, defaultRel string) string {
+	raw := strings.TrimSpace(os.Getenv(envKey))
+	if raw != "" {
+		if filepath.IsAbs(raw) {
+			return raw
+		}
+		return filepath.Join(BaseDir(), raw)
+	}
+	return filepath.Join(BaseDir(), defaultRel)
+}
+
+func ConfigPath() string {
+	return ResolvePath("DS2API_CONFIG_PATH", "config.json")
+}
+
+func WASMPath() string {
+	return ResolvePath("DS2API_WASM_PATH", "sha3_wasm_bg.7b9ca65ddd.wasm")
+}
+
+func StaticAdminDir() string {
+	return ResolvePath("DS2API_STATIC_ADMIN_DIR", "static/admin")
+}
+
+func LoadStore() *Store {
+	cfg, fromEnv, err := loadConfig()
+	if err != nil {
+		Logger.Warn("[config] load failed", "error", err)
+	}
+	if len(cfg.Keys) == 0 && len(cfg.Accounts) == 0 {
+		Logger.Warn("[config] empty config loaded")
+	}
+	s := &Store{cfg: cfg, path: ConfigPath(), fromEnv: fromEnv}
+	s.rebuildIndexes()
+	return s
+}
+
+// rebuildIndexes must be called with the lock already held (or during init).
+func (s *Store) rebuildIndexes() {
+	s.keyMap = make(map[string]struct{}, len(s.cfg.Keys))
+	for _, k := range s.cfg.Keys {
+		s.keyMap[k] = struct{}{}
+	}
+	s.accMap = make(map[string]int, len(s.cfg.Accounts))
+	for i, acc := range s.cfg.Accounts {
+		id := acc.Identifier()
+		if id != "" {
+			s.accMap[id] = i
+		}
+	}
+}
+
+func loadConfig() (Config, bool, error) {
+	rawCfg := strings.TrimSpace(os.Getenv("DS2API_CONFIG_JSON"))
+	if rawCfg == "" {
+		rawCfg = strings.TrimSpace(os.Getenv("CONFIG_JSON"))
+	}
+	if rawCfg != "" {
+		cfg, err := parseConfigString(rawCfg)
+		return cfg, true, err
+	}
+
+	content, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		return Config{}, false, err
+	}
+	var cfg Config
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		return Config{}, false, err
+	}
+	return cfg, false, nil
+}
+
+func parseConfigString(raw string) (Config, error) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(raw), &cfg); err == nil {
+		return cfg, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return Config{}, err
+	}
+	if err := json.Unmarshal(decoded, &cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func (s *Store) Snapshot() Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.Clone()
+}
+
+func (s *Store) HasAPIKey(k string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.keyMap[k]
+	return ok
+}
+
+func (s *Store) Keys() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.cfg.Keys)
+}
+
+func (s *Store) Accounts() []Account {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.cfg.Accounts)
+}
+
+func (s *Store) FindAccount(identifier string) (Account, bool) {
+	identifier = strings.TrimSpace(identifier)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if idx, ok := s.findAccountIndexLocked(identifier); ok {
+		return s.cfg.Accounts[idx], true
+	}
+	return Account{}, false
+}
+
+func (s *Store) UpdateAccountToken(identifier, token string) error {
+	identifier = strings.TrimSpace(identifier)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, ok := s.findAccountIndexLocked(identifier)
+	if !ok {
+		return errors.New("account not found")
+	}
+	oldID := s.cfg.Accounts[idx].Identifier()
+	s.cfg.Accounts[idx].Token = token
+	newID := s.cfg.Accounts[idx].Identifier()
+	// Keep historical aliases usable for long-lived queues while also adding
+	// the latest identifier after token refresh.
+	if identifier != "" {
+		s.accMap[identifier] = idx
+	}
+	if oldID != "" {
+		s.accMap[oldID] = idx
+	}
+	if newID != "" {
+		s.accMap[newID] = idx
+	}
+	return s.saveLocked()
+}
+
+func (s *Store) Replace(cfg Config) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg = cfg.Clone()
+	s.rebuildIndexes()
+	return s.saveLocked()
+}
+
+func (s *Store) Update(mutator func(*Config) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg := s.cfg.Clone()
+	if err := mutator(&cfg); err != nil {
+		return err
+	}
+	s.cfg = cfg
+	s.rebuildIndexes()
+	return s.saveLocked()
+}
+
+func (s *Store) Save() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fromEnv {
+		Logger.Info("[save_config] source from env, skip write")
+		return nil
+	}
+	b, err := json.MarshalIndent(s.cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, b, 0o644)
+}
+
+func (s *Store) saveLocked() error {
+	if s.fromEnv {
+		Logger.Info("[save_config] source from env, skip write")
+		return nil
+	}
+	b, err := json.MarshalIndent(s.cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, b, 0o644)
+}
+
+// findAccountIndexLocked expects the store lock to already be held.
+func (s *Store) findAccountIndexLocked(identifier string) (int, bool) {
+	if idx, ok := s.accMap[identifier]; ok && idx >= 0 && idx < len(s.cfg.Accounts) {
+		return idx, true
+	}
+	// Fallback for token-only accounts whose derived identifier changed after
+	// a token refresh; this preserves correctness on map misses.
+	for i, acc := range s.cfg.Accounts {
+		if acc.Identifier() == identifier {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+func (s *Store) IsEnvBacked() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fromEnv
+}
+
+func (s *Store) SetVercelSync(hash string, ts int64) error {
+	return s.Update(func(c *Config) error {
+		c.VercelSyncHash = hash
+		c.VercelSyncTime = ts
+		return nil
+	})
+}
+
+func (s *Store) ExportJSONAndBase64() (string, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	b, err := json.Marshal(s.cfg)
+	if err != nil {
+		return "", "", err
+	}
+	return string(b), base64.StdEncoding.EncodeToString(b), nil
+}
+
+func (s *Store) ClaudeMapping() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.cfg.ClaudeModelMap) > 0 {
+		return cloneStringMap(s.cfg.ClaudeModelMap)
+	}
+	if len(s.cfg.ClaudeMapping) > 0 {
+		return cloneStringMap(s.cfg.ClaudeMapping)
+	}
+	return map[string]string{"fast": "deepseek-chat", "slow": "deepseek-reasoner"}
+}

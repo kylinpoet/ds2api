@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
-import { Cloud, ArrowRight, ExternalLink, Info, CheckCircle2, XCircle } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Cloud, ArrowRight, ExternalLink, Info, CheckCircle2, XCircle, RefreshCw } from 'lucide-react'
+import clsx from 'clsx'
 import { useI18n } from '../i18n'
 
 export default function VercelSync({ onMessage, authFetch }) {
@@ -10,8 +11,21 @@ export default function VercelSync({ onMessage, authFetch }) {
     const [loading, setLoading] = useState(false)
     const [result, setResult] = useState(null)
     const [preconfig, setPreconfig] = useState(null)
+    const [syncStatus, setSyncStatus] = useState(null)
 
     const apiFetch = authFetch || fetch
+
+    const fetchSyncStatus = useCallback(async () => {
+        try {
+            const res = await apiFetch('/admin/vercel/status')
+            if (res.ok) {
+                const data = await res.json()
+                setSyncStatus(data)
+            }
+        } catch (e) {
+            console.error('Failed to fetch sync status:', e)
+        }
+    }, [apiFetch])
 
     useEffect(() => {
         const loadPreconfig = async () => {
@@ -28,7 +42,11 @@ export default function VercelSync({ onMessage, authFetch }) {
             }
         }
         loadPreconfig()
-    }, [])
+        fetchSyncStatus()
+        // Poll every 15s to detect config changes
+        const interval = setInterval(fetchSyncStatus, 15000)
+        return () => clearInterval(interval)
+    }, [fetchSyncStatus])
 
     const handleSync = async () => {
         const tokenToUse = preconfig?.has_token && !vercelToken ? '__USE_PRECONFIG__' : vercelToken
@@ -58,6 +76,7 @@ export default function VercelSync({ onMessage, authFetch }) {
             if (res.ok) {
                 setResult({ ...data, success: true })
                 onMessage('success', data.message)
+                fetchSyncStatus()
             } else {
                 setResult({ ...data, success: false })
                 onMessage('error', data.detail || t('vercel.syncFailed'))
@@ -74,13 +93,41 @@ export default function VercelSync({ onMessage, authFetch }) {
             {/* Configuration Form */}
             <div className="bg-card border border-border rounded-xl shadow-sm p-6 space-y-6">
                 <div className="border-b border-border pb-6">
-                    <h2 className="text-xl font-semibold flex items-center gap-2">
-                        <Cloud className="w-6 h-6 text-primary" />
-                        {t('vercel.title')}
-                    </h2>
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-semibold flex items-center gap-2">
+                            <Cloud className="w-6 h-6 text-primary" />
+                            {t('vercel.title')}
+                        </h2>
+                        {syncStatus && (
+                            <div className={clsx(
+                                "flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors",
+                                syncStatus.synced
+                                    ? "text-emerald-500 bg-emerald-500/10 border-emerald-500/20"
+                                    : syncStatus.has_synced_before
+                                        ? "text-amber-500 bg-amber-500/10 border-amber-500/20"
+                                        : "text-muted-foreground bg-muted/50 border-border"
+                            )}>
+                                <span className={clsx(
+                                    "w-1.5 h-1.5 rounded-full",
+                                    syncStatus.synced ? "bg-emerald-500" : syncStatus.has_synced_before ? "bg-amber-500 animate-pulse" : "bg-muted-foreground"
+                                )} />
+                                {syncStatus.synced
+                                    ? t('vercel.statusSynced')
+                                    : syncStatus.has_synced_before
+                                        ? t('vercel.statusNotSynced')
+                                        : t('vercel.statusNeverSynced')}
+                            </div>
+                        )}
+                    </div>
                     <p className="text-muted-foreground text-sm mt-1">
                         {t('vercel.description')}
                     </p>
+                    {syncStatus?.last_sync_time && (
+                        <p className="text-xs text-muted-foreground/60 mt-1.5 flex items-center gap-1">
+                            <RefreshCw className="w-3 h-3" />
+                            {t('vercel.lastSyncTime', { time: new Date(syncStatus.last_sync_time * 1000).toLocaleString() })}
+                        </p>
+                    )}
                 </div>
 
                 <div className="space-y-4">

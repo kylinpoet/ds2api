@@ -4,96 +4,170 @@
 ![Stars](https://img.shields.io/github/stars/CJackHwang/ds2api.svg)
 ![Forks](https://img.shields.io/github/forks/CJackHwang/ds2api.svg)
 [![Version](https://img.shields.io/badge/version-1.6.11-blue.svg)](version.txt)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](DEPLOY.md#docker-deployment-recommended)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](DEPLOY.en.md)
 
 Language: [中文](README.MD) | [English](README.en.md)
 
-Convert DeepSeek Web into an **OpenAI & Claude compatible API**, with multi-account rotation, automatic token refresh, and a visual admin console.
+DS2API converts DeepSeek Web chat capability into OpenAI-compatible and Claude-compatible APIs. The backend is a **pure Go implementation**, with a React WebUI admin panel (source in `webui/`, build output auto-generated to `static/admin` during deployment).
 
-![p1](https://github.com/user-attachments/assets/07296a50-50d4-4f05-a9e5-280df14e9532)
-![p2](https://github.com/user-attachments/assets/03b4a763-766f-4050-aea8-1a183e70ae6a)
-![p3](https://github.com/user-attachments/assets/fc8b9836-11e3-4c38-a684-eb2c79b80fe9)
-![p4](https://github.com/user-attachments/assets/513e9ca7-aa9e-45a6-8f7e-f362b1650675)
+## Architecture Overview
 
-## ✨ Features
+```mermaid
+flowchart LR
+    Client["🖥️ Clients\n(OpenAI / Claude compat)"]
 
-- 🔄 **Dual-protocol support** - OpenAI and Claude (Anthropic) compatible APIs
-- 🚀 **Multi-account rotation** - Round-robin load balancing for high concurrency
-- 🔐 **Automatic token refresh** - Re-auth on expiry without manual maintenance
-- 🌐 **WebUI management** - Add accounts, test APIs, and sync Vercel settings visually
-- 🌍 **Language toggle** - Built-in Chinese and English UI switcher
-- 🔍 **Web search** - DeepSeek native search enhancement mode
-- 🧠 **Deep reasoning** - Reasoning mode with trace output
-- 🛠️ **Tool calling** - OpenAI Function Calling compatible
-- ☁️ **One-click Vercel deploy** - No server required
+    subgraph DS2API["DS2API Service"]
+        direction TB
+        CORS["CORS Middleware"]
+        Auth["🔐 Auth Middleware"]
 
-## 📋 Model Support
+        subgraph Adapters["Adapter Layer"]
+            OA["OpenAI Adapter\n/v1/*"]
+            CA["Claude Adapter\n/anthropic/*"]
+        end
 
-### OpenAI compatible endpoint (`/v1/chat/completions`)
+        subgraph Support["Support Modules"]
+            Pool["📦 Account Pool / Queue"]
+            PoW["⚙️ PoW WASM\n(wazero)"]
+        end
 
-| Model | Reasoning | Search | Notes |
-|-----|:--------:|:------:|------|
-| `deepseek-chat` | ❌ | ❌ | Standard chat |
-| `deepseek-reasoner` | ✅ | ❌ | Reasoning (shows trace) |
-| `deepseek-chat-search` | ❌ | ✅ | Web search mode |
-| `deepseek-reasoner-search` | ✅ | ✅ | Reasoning + search |
+        Admin["🛠️ Admin API\n/admin/*"]
+        WebUI["🌐 WebUI\n(/admin)"]
+    end
 
-### Claude compatible endpoint (`/anthropic/v1/messages`)
+    DS["☁️ DeepSeek API"]
 
-| Model | Notes |
-|-----|------|
-| `claude-sonnet-4-20250514` | Maps to deepseek-chat (standard) |
-| `claude-sonnet-4-20250514-fast` | Maps to deepseek-chat (fast) |
-| `claude-sonnet-4-20250514-slow` | Maps to deepseek-reasoner (reasoning) |
+    Client -- "Request" --> CORS --> Auth
+    Auth --> OA & CA
+    OA & CA -- "Call" --> DS
+    Auth --> Admin
+    OA & CA -. "Rotate accounts" .-> Pool
+    OA & CA -. "Compute PoW" .-> PoW
+    DS -- "Response" --> Client
+```
 
-> **Tip**: The Claude endpoint actually calls DeepSeek and returns Anthropic-format responses.
+- **Backend**: Go (`cmd/ds2api/`, `api/`, `internal/`), no Python runtime
+- **Frontend**: React admin panel (`webui/`), served as static build at runtime
+- **Deployment**: local run, Docker, Vercel serverless, Linux systemd
 
-## 🚀 Quick Start
+## Key Capabilities
 
-### Option 1: Vercel deployment (recommended)
+| Capability | Details |
+| --- | --- |
+| OpenAI compatible | `GET /v1/models`, `POST /v1/chat/completions` (stream/non-stream) |
+| Claude compatible | `GET /anthropic/v1/models`, `POST /anthropic/v1/messages`, `POST /anthropic/v1/messages/count_tokens` |
+| Multi-account rotation | Auto token refresh, email/mobile dual login |
+| Concurrency control | Per-account in-flight limit + waiting queue, dynamic recommended concurrency |
+| DeepSeek PoW | WASM solving via `wazero`, no external Node.js dependency |
+| Tool Calling | Anti-leak handling: auto buffer, detect, structured output |
+| Admin API | Config management, account testing/batch test, import/export, Vercel sync |
+| WebUI Admin Panel | SPA at `/admin` (bilingual Chinese/English, dark mode) |
+| Health Probes | `GET /healthz` (liveness), `GET /readyz` (readiness) |
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api&env=DS2API_ADMIN_KEY&envDescription=Admin%20console%20access%20key%20%28required%29&envLink=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api%23environment-variables&project-name=ds2api&repository-name=ds2api)
+## Model Support
 
-1. Click the button above and set `DS2API_ADMIN_KEY`
-2. After deployment, visit `/admin`
-3. Add DeepSeek accounts and custom API keys
-4. Click "Sync to Vercel" to persist configuration
+### OpenAI Endpoint
 
-> **First sync validates accounts and stores tokens automatically.**
+| Model | thinking | search |
+| --- | --- | --- |
+| `deepseek-chat` | ❌ | ❌ |
+| `deepseek-reasoner` | ✅ | ❌ |
+| `deepseek-chat-search` | ❌ | ✅ |
+| `deepseek-reasoner-search` | ✅ | ✅ |
 
-### Option 2: Local development
+### Claude Endpoint
+
+| Model | Default Mapping |
+| --- | --- |
+| `claude-sonnet-4-5` | `deepseek-chat` |
+| `claude-haiku-4-5` (compatible with `claude-3-5-haiku-latest`) | `deepseek-chat` |
+| `claude-opus-4-6` | `deepseek-reasoner` |
+
+Override mapping via `claude_mapping` or `claude_model_mapping` in config.
+In addition, `/anthropic/v1/models` now includes historical Claude 1.x/2.x/3.x/4.x IDs and common aliases for legacy client compatibility.
+
+## Quick Start
+
+### Option 1: Local Run
+
+**Prerequisites**: Go 1.24+, Node.js 20+ (only if building WebUI locally)
 
 ```bash
-# 1. Clone the repo
+# 1. Clone
 git clone https://github.com/CJackHwang/ds2api.git
 cd ds2api
 
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Configure accounts
+# 2. Configure
 cp config.example.json config.json
-# Edit config.json to add DeepSeek account info
+# Edit config.json with your DeepSeek account info and API keys
 
-# 4. Start the service
-python dev.py
+# 3. Start
+go run ./cmd/ds2api
 ```
 
-Visit `http://localhost:5001` after startup.
+Default URL: `http://localhost:5001`
 
-## ⚙️ Configuration
+> **WebUI auto-build**: On first local startup, if `static/admin` is missing, DS2API will auto-run `npm install && npm run build` (requires Node.js). You can also build manually: `./scripts/build-webui.sh`
 
-### Environment variables
+### Option 2: Docker
 
-| Variable | Description | Required |
-|-----|------|:----:|
-| `DS2API_ADMIN_KEY` | Admin console password | Required on Vercel |
-| `DS2API_CONFIG_JSON` | Config JSON or Base64 | Optional |
-| `VERCEL_TOKEN` | Vercel API token (for sync) | Optional |
-| `VERCEL_PROJECT_ID` | Vercel project ID | Optional |
-| `PORT` | Service port (default 5001) | Optional |
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Edit .env
 
-### Config file format (`config.json`)
+# 2. Start
+docker-compose up -d
+
+# 3. View logs
+docker-compose logs -f
+```
+
+Rebuild after updates: `docker-compose up -d --build`
+
+### Option 3: Vercel
+
+1. Fork this repo to your GitHub account
+2. Import the project on Vercel
+3. Set environment variables (minimum: `DS2API_ADMIN_KEY` and `DS2API_CONFIG_JSON`)
+4. Deploy
+
+> **Streaming note**: `/v1/chat/completions` on Vercel is routed to `api/chat-stream.js` (Node Runtime) for real-time SSE. Auth, account selection, and session/PoW preparation are still handled by the Go internal prepare endpoint; streaming output (including `tools`) is assembled on Node with Go-aligned anti-leak handling.
+
+For detailed deployment instructions, see the [Deployment Guide](DEPLOY.en.md).
+
+### Option 4: Download Release Binaries
+
+GitHub Actions automatically builds multi-platform archives on each Release:
+
+```bash
+# After downloading the archive for your platform
+tar -xzf ds2api_v1.7.0_linux_amd64.tar.gz
+cd ds2api_v1.7.0_linux_amd64
+cp config.example.json config.json
+# Edit config.json
+./ds2api
+```
+
+### Option 5: OpenCode CLI
+
+1. Copy the example config:
+
+```bash
+cp opencode.json.example opencode.json
+```
+
+2. Edit `opencode.json`:
+- Set `baseURL` to your DS2API endpoint (for example, `https://your-domain.com/v1`)
+- Set `apiKey` to your DS2API key (from `config.keys`)
+
+3. Start OpenCode CLI in the project directory (run `opencode` using your installed method).
+
+> Recommended: use the OpenAI-compatible path (`/v1/*`) via `@ai-sdk/openai-compatible` as shown in the example.
+
+## Configuration
+
+### `config.json` Example
 
 ```json
 {
@@ -109,125 +183,158 @@ Visit `http://localhost:5001` after startup.
       "password": "your-password",
       "token": ""
     }
-  ]
+  ],
+  "claude_model_mapping": {
+    "fast": "deepseek-chat",
+    "slow": "deepseek-reasoner"
+  }
 }
 ```
 
-> **Notes**:
-> - `keys`: Custom API keys for calling this service
-> - `accounts`: DeepSeek Web accounts (email or mobile)
-> - `token`: Leave blank; DS2API will fetch and refresh automatically
+- `keys`: API access keys; clients authenticate via `Authorization: Bearer <key>`
+- `accounts`: DeepSeek account list, supports `email` or `mobile` login
+- `token`: Leave empty for auto-login on first request; or pre-fill an existing token
+- `claude_model_mapping`: Maps `fast`/`slow` suffixes to corresponding DeepSeek models
 
-## 📡 API Usage
+### Environment Variables
 
-See **[API.md](API.md)** for full API documentation.
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `PORT` | Service port | `5001` |
+| `LOG_LEVEL` | Log level | `INFO` (`DEBUG`/`WARN`/`ERROR`) |
+| `DS2API_ADMIN_KEY` | Admin login key | `admin` |
+| `DS2API_JWT_SECRET` | Admin JWT signing secret | Same as `DS2API_ADMIN_KEY` |
+| `DS2API_JWT_EXPIRE_HOURS` | Admin JWT TTL in hours | `24` |
+| `DS2API_CONFIG_PATH` | Config file path | `config.json` |
+| `DS2API_CONFIG_JSON` | Inline config (JSON or Base64) | — |
+| `DS2API_WASM_PATH` | PoW WASM file path | Auto-detect |
+| `DS2API_STATIC_ADMIN_DIR` | Admin static assets dir | `static/admin` |
+| `DS2API_AUTO_BUILD_WEBUI` | Auto-build WebUI on startup | Enabled locally, disabled on Vercel |
+| `DS2API_ACCOUNT_MAX_INFLIGHT` | Max in-flight requests per account | `2` |
+| `DS2API_ACCOUNT_CONCURRENCY` | Alias (legacy compat) | — |
+| `DS2API_ACCOUNT_MAX_QUEUE` | Waiting queue limit | `recommended_concurrency` |
+| `DS2API_ACCOUNT_QUEUE_SIZE` | Alias (legacy compat) | — |
+| `DS2API_VERCEL_INTERNAL_SECRET` | Vercel hybrid streaming internal auth | Falls back to `DS2API_ADMIN_KEY` |
+| `DS2API_VERCEL_STREAM_LEASE_TTL_SECONDS` | Stream lease TTL seconds | `900` |
+| `VERCEL_TOKEN` | Vercel sync token | — |
+| `VERCEL_PROJECT_ID` | Vercel project ID | — |
+| `VERCEL_TEAM_ID` | Vercel team ID | — |
+| `DS2API_VERCEL_PROTECTION_BYPASS` | Vercel deployment protection bypass for internal Node→Go calls | — |
 
-### Quick examples
+## Authentication Modes
 
-**List models**:
+For business endpoints (`/v1/*`, `/anthropic/*`), DS2API supports two modes:
+
+| Mode | Description |
+| --- | --- |
+| **Managed account** | Use a key from `config.keys` via `Authorization: Bearer ...` or `x-api-key`; DS2API auto-selects an account |
+| **Direct token** | If the token is not in `config.keys`, DS2API treats it as a DeepSeek token directly |
+
+Optional header `X-Ds2-Target-Account`: Pin a specific managed account (value is email or mobile).
+
+## Concurrency Model
+
+```
+Per-account inflight = DS2API_ACCOUNT_MAX_INFLIGHT (default 2)
+Recommended concurrency = account_count × per_account_inflight
+Queue limit = DS2API_ACCOUNT_MAX_QUEUE (default = recommended concurrency)
+429 threshold = inflight + queue ≈ account_count × 4
+```
+
+- When inflight slots are full, requests enter a waiting queue — **no immediate 429**
+- 429 is returned only when total load exceeds inflight + queue capacity
+- `GET /admin/queue/status` returns real-time concurrency state
+
+## Tool Call Adaptation
+
+When `tools` is present in the request, DS2API performs anti-leak handling:
+
+1. With `stream=true`, DS2API **buffers** text deltas first
+2. If a tool call is detected → only structured `tool_calls` are emitted, raw JSON is not leaked
+3. If no tool call → buffered text is emitted at once
+4. Parser supports mixed text, fenced JSON, and `function.arguments` payloads
+
+## Project Structure
+
+```text
+ds2api/
+├── cmd/
+│   ├── ds2api/              # Local / container entrypoint
+│   └── ds2api-tests/        # End-to-end testsuite entrypoint
+├── api/
+│   ├── index.go             # Vercel Serverless Go entry
+│   ├── chat-stream.js       # Vercel Node.js stream relay
+│   └── helpers/             # Node.js helper modules
+├── internal/
+│   ├── account/             # Account pool and concurrency queue
+│   ├── adapter/
+│   │   ├── openai/          # OpenAI adapter (incl. tool call parsing, Vercel stream prepare/release)
+│   │   └── claude/          # Claude adapter
+│   ├── admin/               # Admin API handlers
+│   ├── auth/                # Auth and JWT
+│   ├── config/              # Config loading and hot-reload
+│   ├── deepseek/            # DeepSeek API client, PoW WASM
+│   ├── server/              # HTTP routing and middleware (chi router)
+│   ├── sse/                 # SSE parsing utilities
+│   ├── util/                # Common utilities
+│   └── webui/               # WebUI static file serving and auto-build
+├── webui/                   # React WebUI source (Vite + Tailwind)
+│   └── src/
+│       ├── components/      # AccountManager / ApiTester / BatchImport / VercelSync / Login / LandingPage
+│       └── locales/         # Language packs (zh.json / en.json)
+├── scripts/
+│   ├── build-webui.sh       # Manual WebUI build script
+│   └── testsuite/           # Testsuite runner scripts
+├── static/admin/            # WebUI build output (not committed to Git)
+├── .github/
+│   ├── workflows/           # GitHub Actions (Release artifact automation)
+│   ├── ISSUE_TEMPLATE/      # Issue templates
+│   └── PULL_REQUEST_TEMPLATE.md
+├── config.example.json      # Config file template
+├── .env.example             # Environment variable template
+├── Dockerfile               # Multi-stage build (WebUI + Go)
+├── docker-compose.yml       # Production Docker Compose
+├── docker-compose.dev.yml   # Development Docker Compose
+├── vercel.json              # Vercel routing and build config
+├── go.mod / go.sum          # Go module dependencies
+└── version.txt              # Version number
+```
+
+## Documentation Index
+
+| Document | Description |
+| --- | --- |
+| [API.md](API.md) / [API.en.md](API.en.md) | API reference with request/response examples |
+| [DEPLOY.md](DEPLOY.md) / [DEPLOY.en.md](DEPLOY.en.md) | Deployment guide (local/Docker/Vercel/systemd) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) / [CONTRIBUTING.en.md](CONTRIBUTING.en.md) | Contributing guide |
+| [TESTING.md](TESTING.md) | Testsuite guide |
+
+## Testing
+
 ```bash
-curl http://localhost:5001/v1/models
+# Unit tests
+go test ./...
+
+# One-command live end-to-end tests (real accounts, full request/response logs)
+./scripts/testsuite/run-live.sh
+
+# Or with custom flags
+go run ./cmd/ds2api-tests \
+  --config config.json \
+  --admin-key admin \
+  --out artifacts/testsuite \
+  --timeout 120 \
+  --retries 2
 ```
 
-**OpenAI-compatible call**:
-```bash
-curl http://localhost:5001/v1/chat/completions \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "deepseek-chat",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "stream": true
-  }'
-```
+## Release Artifact Automation (GitHub Actions)
 
-**Claude-compatible call**:
-```bash
-curl http://localhost:5001/anthropic/v1/messages \
-  -H "x-api-key: your-api-key" \
-  -H "Content-Type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
-  -d '{
-    "model": "claude-sonnet-4-20250514",
-    "max_tokens": 1024,
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
-```
+Workflow: `.github/workflows/release-artifacts.yml`
 
-### Python SDK usage
+- **Trigger**: only on GitHub Release `published` (normal pushes do not trigger builds)
+- **Outputs**: multi-platform archives (`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`) + `sha256sums.txt`
+- **Each archive includes**: `ds2api` executable, `static/admin`, WASM file, config template, README, LICENSE
 
-```python
-from openai import OpenAI
+## Disclaimer
 
-client = OpenAI(
-    api_key="your-api-key",
-    base_url="http://localhost:5001/v1"
-)
-
-response = client.chat.completions.create(
-    model="deepseek-reasoner",
-    messages=[{"role": "user", "content": "Explain quantum entanglement"}],
-    stream=True
-)
-
-for chunk in response:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
-```
-
-## 🔧 Deployment Notes
-
-### Nginx reverse proxy
-
-```nginx
-location / {
-    proxy_pass http://localhost:5001;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_buffering off;
-    proxy_cache off;
-    chunked_transfer_encoding on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 120;
-}
-```
-
-### Option 3: Docker deployment
-
-```bash
-# 1. Clone the repo and enter the directory
-git clone https://github.com/CJackHwang/ds2api.git
-cd ds2api
-
-# 2. Configure environment variables
-cp .env.example .env
-# Edit .env and fill in DS2API_ADMIN_KEY and DS2API_CONFIG_JSON
-
-# 3. Start the service
-docker-compose up -d
-
-# 4. Check logs
-docker-compose logs -f
-```
-
-> **Docker advantage**: Zero-intrusion design; update the main code with `docker-compose up -d --build` without changing Docker configuration. See [DEPLOY.md](DEPLOY.md#docker-deployment-recommended).
-
-## ⚠️ Disclaimer
-
-**This project is based on reverse engineering and stability is not guaranteed.**
-
-- For learning and research only. **No commercial use or public service is allowed.**
-- For production, use the official [DeepSeek API](https://platform.deepseek.com/)
-- You assume all risks from using this project
-
-## 📜 Acknowledgements
-
-This project is based on the following open-source projects:
-
-- [iidamie/deepseek2api](https://github.com/iidamie/deepseek2api)
-- [LLM-Red-Team/deepseek-free-api](https://github.com/LLM-Red-Team/deepseek-free-api)
-
-## 📊 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=CJackHwang/ds2api&type=Date)](https://star-history.com/#CJackHwang/ds2api&Date)
+This project is built through reverse engineering and is provided for learning and research only. Stability is not guaranteed. Do not use it in scenarios that violate terms of service or laws.

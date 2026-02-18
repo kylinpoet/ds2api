@@ -4,98 +4,170 @@
 ![Stars](https://img.shields.io/github/stars/CJackHwang/ds2api.svg)
 ![Forks](https://img.shields.io/github/forks/CJackHwang/ds2api.svg)
 [![Version](https://img.shields.io/badge/version-1.6.11-blue.svg)](version.txt)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](DEPLOY.md#docker-部署推荐)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](DEPLOY.md)
 
 语言 / Language: [中文](README.MD) | [English](README.en.md)
 
-将 DeepSeek 免费对话版转换为 **OpenAI & Claude 兼容 API**，支持多账号轮询、自动 Token 刷新、可视化管理界面。
+将 DeepSeek Web 对话能力转换为 OpenAI 与 Claude 兼容 API。后端为 **Go 全量实现**，前端为 React WebUI 管理台（源码在 `webui/`，部署时自动构建到 `static/admin`）。
 
-![p1](https://github.com/user-attachments/assets/07296a50-50d4-4f05-a9e5-280df14e9532)
-![p2](https://github.com/user-attachments/assets/03b4a763-766f-4050-aea8-1a183e70ae6a)
-![p3](https://github.com/user-attachments/assets/fc8b9836-11e3-4c38-a684-eb2c79b80fe9)
-![p4](https://github.com/user-attachments/assets/513e9ca7-aa9e-45a6-8f7e-f362b1650675)
+## 架构概览
 
+```mermaid
+flowchart LR
+    Client["🖥️ 客户端\n(OpenAI / Claude 兼容)"]
 
+    subgraph DS2API["DS2API 服务"]
+        direction TB
+        CORS["CORS 中间件"]
+        Auth["🔐 鉴权中间件"]
 
-## ✨ 特性
+        subgraph Adapters["适配器层"]
+            OA["OpenAI 适配器\n/v1/*"]
+            CA["Claude 适配器\n/anthropic/*"]
+        end
 
-- 🔄 **双协议兼容** - 同时支持 OpenAI 和 Claude (Anthropic) API 格式
-- 🚀 **多账号轮询** - Round-Robin 负载均衡，支持高并发场景
-- 🔐 **Token 自动刷新** - 过期自动重新登录，无需手动维护
-- 🌐 **WebUI 管理** - 可视化添加账号、测试 API、同步 Vercel 配置
-- 🌍 **多语言切换** - WebUI 内置中英双语，可随时切换
-- 🔍 **联网搜索** - 支持 DeepSeek 原生搜索增强模式
-- 🧠 **深度思考** - 支持推理模式，输出思考过程
-- 🛠️ **工具调用** - 兼容 OpenAI Function Calling 格式
-- ☁️ **Vercel 一键部署** - 无需服务器，快速上线
+        subgraph Support["支撑模块"]
+            Pool["📦 账号池 / 并发队列"]
+            PoW["⚙️ PoW WASM\n(wazero)"]
+        end
 
-## 📋 模型支持
+        Admin["🛠️ Admin API\n/admin/*"]
+        WebUI["🌐 WebUI\n(/admin)"]
+    end
 
-### OpenAI 兼容接口 (`/v1/chat/completions`)
+    DS["☁️ DeepSeek API"]
 
-| 模型 | 深度思考 | 联网搜索 | 说明 |
-|-----|:--------:|:--------:|------|
-| `deepseek-chat` | ❌ | ❌ | 标准对话模式 |
-| `deepseek-reasoner` | ✅ | ❌ | 推理模式（输出思考过程） |
-| `deepseek-chat-search` | ❌ | ✅ | 联网搜索模式 |
-| `deepseek-reasoner-search` | ✅ | ✅ | 推理 + 联网搜索 |
+    Client -- "请求" --> CORS --> Auth
+    Auth --> OA & CA
+    OA & CA -- "调用" --> DS
+    Auth --> Admin
+    OA & CA -. "轮询选账号" .-> Pool
+    OA & CA -. "计算 PoW" .-> PoW
+    DS -- "响应" --> Client
+```
 
-### Claude 兼容接口 (`/anthropic/v1/messages`)
+- **后端**：Go（`cmd/ds2api/`、`api/`、`internal/`），不依赖 Python 运行时
+- **前端**：React 管理台（`webui/`），运行时托管静态构建产物
+- **部署**：本地运行、Docker、Vercel Serverless、Linux systemd
 
-| 模型 | 说明 |
-|-----|------|
-| `claude-sonnet-4-20250514` | 映射到 deepseek-chat（标准模式） |
-| `claude-sonnet-4-20250514-fast` | 映射到 deepseek-chat（快速模式） |
-| `claude-sonnet-4-20250514-slow` | 映射到 deepseek-reasoner（推理模式） |
+## 核心能力
 
-> **提示**：Claude 接口实际调用的是 DeepSeek，响应格式会自动转换为 Anthropic 标准格式。
+| 能力 | 说明 |
+| --- | --- |
+| OpenAI 兼容 | `GET /v1/models`、`POST /v1/chat/completions`（流式/非流式） |
+| Claude 兼容 | `GET /anthropic/v1/models`、`POST /anthropic/v1/messages`、`POST /anthropic/v1/messages/count_tokens` |
+| 多账号轮询 | 自动 token 刷新、邮箱/手机号双登录方式 |
+| 并发队列控制 | 每账号 in-flight 上限 + 等待队列，动态计算建议并发值 |
+| DeepSeek PoW | WASM 计算（`wazero`），无需外部 Node.js 依赖 |
+| Tool Calling | 防泄漏处理：自动缓冲、识别、结构化输出 |
+| Admin API | 配置管理、账号测试 / 批量测试、导入导出、Vercel 同步 |
+| WebUI 管理台 | `/admin` 单页应用（中英文双语、深色模式） |
+| 运维探针 | `GET /healthz`（存活）、`GET /readyz`（就绪） |
 
-## 🚀 快速开始
+## 模型支持
 
-### 方式一：Vercel 部署（推荐）
+### OpenAI 接口
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api&env=DS2API_ADMIN_KEY&envDescription=管理面板访问密码（必填）&envLink=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api%23环境变量&project-name=ds2api&repository-name=ds2api)
+| 模型 | thinking | search |
+| --- | --- | --- |
+| `deepseek-chat` | ❌ | ❌ |
+| `deepseek-reasoner` | ✅ | ❌ |
+| `deepseek-chat-search` | ❌ | ✅ |
+| `deepseek-reasoner-search` | ✅ | ✅ |
 
-1. 点击上方按钮，设置管理密码 `DS2API_ADMIN_KEY`
-2. 部署完成后访问 `/admin` 管理界面
-3. 添加 DeepSeek 账号和自定义 API Key
-4. 点击「同步到 Vercel」保存配置
+### Claude 接口
 
-> **首次同步会自动验证账号并保存 Token，后续操作无需重复输入凭证。**
+| 模型 | 默认映射 |
+| --- | --- |
+| `claude-sonnet-4-5` | `deepseek-chat` |
+| `claude-haiku-4-5`（兼容 `claude-3-5-haiku-latest`） | `deepseek-chat` |
+| `claude-opus-4-6` | `deepseek-reasoner` |
 
-### 方式二：本地开发
+可通过配置中的 `claude_mapping` 或 `claude_model_mapping` 覆盖映射关系。
+另外，`/anthropic/v1/models` 现已包含 Claude 1.x/2.x/3.x/4.x 历史模型 ID 与常见别名，便于旧客户端直接兼容。
+
+## 快速开始
+
+### 方式一：本地运行
+
+**前置要求**：Go 1.24+，Node.js 20+（仅在需要构建 WebUI 时）
 
 ```bash
 # 1. 克隆仓库
 git clone https://github.com/CJackHwang/ds2api.git
 cd ds2api
 
-# 2. 安装依赖
-pip install -r requirements.txt
-
-# 3. 配置账号
+# 2. 配置
 cp config.example.json config.json
-# 编辑 config.json，添加 DeepSeek 账号信息
+# 编辑 config.json，填入你的 DeepSeek 账号信息和 API key
 
-# 4. 启动服务
-python dev.py
+# 3. 启动
+go run ./cmd/ds2api
 ```
 
-服务启动后访问 `http://localhost:5001`
+默认监听地址：`http://localhost:5001`
 
-## ⚙️ 配置说明
+> **WebUI 自动构建**：本地首次启动时，若 `static/admin` 不存在，会自动尝试执行 `npm install && npm run build`（需要本机有 Node.js）。你也可以手动构建：`./scripts/build-webui.sh`
 
-### 环境变量
+### 方式二：Docker 运行
 
-| 变量 | 说明 | 必填 |
-|-----|------|:----:|
-| `DS2API_ADMIN_KEY` | 管理面板密码 | Vercel 必填 |
-| `DS2API_CONFIG_JSON` | 配置 JSON 或 Base64 编码 | 可选 |
-| `VERCEL_TOKEN` | Vercel API Token（用于同步） | 可选 |
-| `VERCEL_PROJECT_ID` | Vercel 项目 ID | 可选 |
-| `PORT` | 服务端口（默认 5001） | 可选 |
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+# 编辑 .env
 
-### 配置文件格式 (`config.json`)
+# 2. 启动
+docker-compose up -d
+
+# 3. 查看日志
+docker-compose logs -f
+```
+
+更新镜像：`docker-compose up -d --build`
+
+### 方式三：Vercel 部署
+
+1. Fork 仓库到自己的 GitHub
+2. 在 Vercel 上导入项目
+3. 配置环境变量（至少设置 `DS2API_ADMIN_KEY` 和 `DS2API_CONFIG_JSON`）
+4. 部署
+
+> **流式说明**：`/v1/chat/completions` 在 Vercel 上默认走 `api/chat-stream.js`（Node Runtime）以保证实时 SSE。鉴权、账号选择、会话/PoW 准备仍由 Go 内部 prepare 接口完成；流式响应（含 `tools`）在 Node 侧执行与 Go 对齐的输出组装与防泄漏处理。
+
+详细部署说明请参阅 [部署指南](DEPLOY.md)。
+
+### 方式四：下载 Release 构建包
+
+每次发布 Release 时，GitHub Actions 会自动构建多平台二进制包：
+
+```bash
+# 下载对应平台的压缩包后
+tar -xzf ds2api_v1.7.0_linux_amd64.tar.gz
+cd ds2api_v1.7.0_linux_amd64
+cp config.example.json config.json
+# 编辑 config.json
+./ds2api
+```
+
+### 方式五：OpenCode CLI 接入
+
+1. 复制示例配置：
+
+```bash
+cp opencode.json.example opencode.json
+```
+
+2. 编辑 `opencode.json`：
+- 将 `baseURL` 改为你的 DS2API 地址（例如 `https://your-domain.com/v1`）
+- 将 `apiKey` 改为你的 DS2API key（对应 `config.keys`）
+
+3. 在项目目录启动 OpenCode CLI（按你的安装方式运行 `opencode`）。
+
+> 建议优先使用 OpenAI 兼容路径（`/v1/*`），即示例里的 `@ai-sdk/openai-compatible` provider。
+
+## 配置说明
+
+### `config.json` 示例
 
 ```json
 {
@@ -111,125 +183,158 @@ python dev.py
       "password": "your-password",
       "token": ""
     }
-  ]
+  ],
+  "claude_model_mapping": {
+    "fast": "deepseek-chat",
+    "slow": "deepseek-reasoner"
+  }
 }
 ```
 
-> **说明**：
-> - `keys`: 自定义的 API 密钥，用于调用本服务
-> - `accounts`: DeepSeek 网页版账号，支持邮箱或手机号登录
-> - `token`: 留空即可，系统会自动获取并刷新
+- `keys`：API 访问密钥列表，客户端通过 `Authorization: Bearer <key>` 鉴权
+- `accounts`：DeepSeek 账号列表，支持 `email` 或 `mobile` 登录
+- `token`：留空则首次请求时自动登录获取；也可预填已有 token
+- `claude_model_mapping`：字典中 `fast`/`slow` 后缀映射到对应 DeepSeek 模型
 
-## 📡 API 使用
+### 环境变量
 
-完整 API 文档请参阅 **[API.md](API.md)**
+| 变量 | 用途 | 默认值 |
+| --- | --- | --- |
+| `PORT` | 服务端口 | `5001` |
+| `LOG_LEVEL` | 日志级别 | `INFO`（可选：`DEBUG`/`WARN`/`ERROR`） |
+| `DS2API_ADMIN_KEY` | Admin 登录密钥 | `admin` |
+| `DS2API_JWT_SECRET` | Admin JWT 签名密钥 | 等同 `DS2API_ADMIN_KEY` |
+| `DS2API_JWT_EXPIRE_HOURS` | Admin JWT 过期小时数 | `24` |
+| `DS2API_CONFIG_PATH` | 配置文件路径 | `config.json` |
+| `DS2API_CONFIG_JSON` | 直接注入配置（JSON 或 Base64） | — |
+| `DS2API_WASM_PATH` | PoW WASM 文件路径 | 自动查找 |
+| `DS2API_STATIC_ADMIN_DIR` | 管理台静态文件目录 | `static/admin` |
+| `DS2API_AUTO_BUILD_WEBUI` | 启动时自动构建 WebUI | 本地开启，Vercel 关闭 |
+| `DS2API_ACCOUNT_MAX_INFLIGHT` | 每账号最大并发 in-flight 请求数 | `2` |
+| `DS2API_ACCOUNT_CONCURRENCY` | 同上（兼容旧名） | — |
+| `DS2API_ACCOUNT_MAX_QUEUE` | 等待队列上限 | `recommended_concurrency` |
+| `DS2API_ACCOUNT_QUEUE_SIZE` | 同上（兼容旧名） | — |
+| `DS2API_VERCEL_INTERNAL_SECRET` | Vercel 混合流式内部鉴权密钥 | 回退用 `DS2API_ADMIN_KEY` |
+| `DS2API_VERCEL_STREAM_LEASE_TTL_SECONDS` | 流式 lease 过期秒数 | `900` |
+| `VERCEL_TOKEN` | Vercel 同步 token | — |
+| `VERCEL_PROJECT_ID` | Vercel 项目 ID | — |
+| `VERCEL_TEAM_ID` | Vercel 团队 ID | — |
+| `DS2API_VERCEL_PROTECTION_BYPASS` | Vercel 部署保护绕过密钥（内部 Node→Go 调用） | — |
 
-### 快速示例
+## 鉴权模式
 
-**获取模型列表**：
+调用业务接口（`/v1/*`、`/anthropic/*`）时支持两种模式：
+
+| 模式 | 说明 |
+| --- | --- |
+| **托管账号模式** | `Bearer` 或 `x-api-key` 传入 `config.keys` 中的 key，由服务自动轮询选择账号 |
+| **直通 token 模式** | 传入 token 不在 `config.keys` 中时，直接作为 DeepSeek token 使用 |
+
+可选请求头 `X-Ds2-Target-Account`：指定使用某个托管账号（值为 email 或 mobile）。
+
+## 并发模型
+
+```
+每账号可用并发 = DS2API_ACCOUNT_MAX_INFLIGHT（默认 2）
+建议并发值 = 账号数量 × 每账号并发上限
+等待队列上限 = DS2API_ACCOUNT_MAX_QUEUE（默认 = 建议并发值）
+429 阈值 = in-flight + 等待队列 ≈ 账号数量 × 4
+```
+
+- 当 in-flight 槽位满时，请求进入等待队列，**不会立即 429**
+- 超出总承载上限后才返回 `429 Too Many Requests`
+- `GET /admin/queue/status` 返回实时并发状态
+
+## Tool Call 适配
+
+当请求中带 `tools` 时，DS2API 会做防泄漏处理：
+
+1. `stream=true` 时先**缓冲**正文片段
+2. 若识别到工具调用 → 仅输出结构化 `tool_calls`，不透传原始 JSON 文本
+3. 若最终不是工具调用 → 一次性输出普通文本
+4. 解析器支持混合文本、fenced JSON、`function.arguments` 字符串等格式
+
+## 项目结构
+
+```text
+ds2api/
+├── cmd/
+│   ├── ds2api/              # 本地 / 容器启动入口
+│   └── ds2api-tests/        # 端到端测试集入口
+├── api/
+│   ├── index.go             # Vercel Serverless Go 入口
+│   ├── chat-stream.js       # Vercel Node.js 流式转发
+│   └── helpers/             # Node.js 辅助模块
+├── internal/
+│   ├── account/             # 账号池与并发队列
+│   ├── adapter/
+│   │   ├── openai/          # OpenAI 兼容适配器（含 Tool Call 解析、Vercel 流式 prepare/release）
+│   │   └── claude/          # Claude 兼容适配器
+│   ├── admin/               # Admin API handlers
+│   ├── auth/                # 鉴权与 JWT
+│   ├── config/              # 配置加载与热更新
+│   ├── deepseek/            # DeepSeek API 客户端、PoW WASM
+│   ├── server/              # HTTP 路由与中间件（chi router）
+│   ├── sse/                 # SSE 解析工具
+│   ├── util/                # 通用工具函数
+│   └── webui/               # WebUI 静态文件托管与自动构建
+├── webui/                   # React WebUI 源码（Vite + Tailwind）
+│   └── src/
+│       ├── components/      # AccountManager / ApiTester / BatchImport / VercelSync / Login / LandingPage
+│       └── locales/         # 中英文语言包（zh.json / en.json）
+├── scripts/
+│   ├── build-webui.sh       # WebUI 手动构建脚本
+│   └── testsuite/           # 测试集运行脚本
+├── static/admin/            # WebUI 构建产物（不提交到 Git）
+├── .github/
+│   ├── workflows/           # GitHub Actions（Release 自动构建）
+│   ├── ISSUE_TEMPLATE/      # Issue 模板
+│   └── PULL_REQUEST_TEMPLATE.md
+├── config.example.json      # 配置文件示例
+├── .env.example             # 环境变量示例
+├── Dockerfile               # 多阶段构建（WebUI + Go）
+├── docker-compose.yml       # 生产环境 Docker Compose
+├── docker-compose.dev.yml   # 开发环境 Docker Compose
+├── vercel.json              # Vercel 路由与构建配置
+├── go.mod / go.sum          # Go 模块依赖
+└── version.txt              # 版本号
+```
+
+## 文档索引
+
+| 文档 | 说明 |
+| --- | --- |
+| [API.md](API.md) / [API.en.md](API.en.md) | API 接口文档（含请求/响应示例） |
+| [DEPLOY.md](DEPLOY.md) / [DEPLOY.en.md](DEPLOY.en.md) | 部署指南（本地/Docker/Vercel/systemd） |
+| [CONTRIBUTING.md](CONTRIBUTING.md) / [CONTRIBUTING.en.md](CONTRIBUTING.en.md) | 贡献指南 |
+| [TESTING.md](TESTING.md) | 测试集使用指南 |
+
+## 测试
+
 ```bash
-curl http://localhost:5001/v1/models
+# 单元测试
+go test ./...
+
+# 一键端到端全链路测试（真实账号，生成完整请求/响应日志）
+./scripts/testsuite/run-live.sh
+
+# 或自定义参数
+go run ./cmd/ds2api-tests \
+  --config config.json \
+  --admin-key admin \
+  --out artifacts/testsuite \
+  --timeout 120 \
+  --retries 2
 ```
 
-**OpenAI 格式调用**：
-```bash
-curl http://localhost:5001/v1/chat/completions \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "deepseek-chat",
-    "messages": [{"role": "user", "content": "你好"}],
-    "stream": true
-  }'
-```
+## Release 自动构建（GitHub Actions）
 
-**Claude 格式调用**：
-```bash
-curl http://localhost:5001/anthropic/v1/messages \
-  -H "x-api-key: your-api-key" \
-  -H "Content-Type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
-  -d '{
-    "model": "claude-sonnet-4-20250514",
-    "max_tokens": 1024,
-    "messages": [{"role": "user", "content": "你好"}]
-  }'
-```
+工作流文件：`.github/workflows/release-artifacts.yml`
 
-### Python SDK 使用
+- **触发条件**：仅在 GitHub Release `published` 时触发（普通 push 不会触发）
+- **构建产物**：多平台二进制包（`linux/amd64`、`linux/arm64`、`darwin/amd64`、`darwin/arm64`、`windows/amd64`）+ `sha256sums.txt`
+- **每个压缩包包含**：`ds2api` 可执行文件、`static/admin`、WASM 文件、配置示例、README、LICENSE
 
-```python
-from openai import OpenAI
+## 免责声明
 
-client = OpenAI(
-    api_key="your-api-key",
-    base_url="http://localhost:5001/v1"
-)
-
-response = client.chat.completions.create(
-    model="deepseek-reasoner",
-    messages=[{"role": "user", "content": "请解释量子纠缠"}],
-    stream=True
-)
-
-for chunk in response:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
-```
-
-## 🔧 部署配置
-
-### Nginx 反向代理
-
-```nginx
-location / {
-    proxy_pass http://localhost:5001;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_buffering off;
-    proxy_cache off;
-    chunked_transfer_encoding on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 120;
-}
-```
-
-### 方式三：Docker 部署
-
-```bash
-# 1. 克隆仓库并进入目录
-git clone https://github.com/CJackHwang/ds2api.git
-cd ds2api
-
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env，填写 DS2API_ADMIN_KEY 和 DS2API_CONFIG_JSON
-
-# 3. 启动服务
-docker-compose up -d
-
-# 4. 查看日志
-docker-compose logs -f
-```
-
-> **Docker 优势**：零侵入设计，主代码更新只需 `docker-compose up -d --build`，无需修改 Docker 配置。详见 [DEPLOY.md](DEPLOY.md#docker-部署推荐)。
-
-## ⚠️ 免责声明
-
-**本项目基于逆向工程实现，服务稳定性无法保证。**
-
-- 仅供学习研究使用，**禁止商业用途或对外提供服务**
-- 建议正式项目使用 [DeepSeek 官方 API](https://platform.deepseek.com/)
-- 使用本项目产生的任何风险由用户自行承担
-
-## 📜 鸣谢
-
-本项目基于以下开源项目：
-
-- [iidamie/deepseek2api](https://github.com/iidamie/deepseek2api)
-- [LLM-Red-Team/deepseek-free-api](https://github.com/LLM-Red-Team/deepseek-free-api)
-
-## 📊 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=CJackHwang/ds2api&type=Date)](https://star-history.com/#CJackHwang/ds2api&Date)
+本项目基于逆向方式实现，仅供学习与研究使用。稳定性和可用性不作保证，请勿用于违反服务条款或法律法规的场景。
