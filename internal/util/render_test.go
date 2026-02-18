@@ -54,6 +54,28 @@ func TestBuildOpenAIResponseObjectWithText(t *testing.T) {
 	}
 }
 
+func TestBuildOpenAIResponseObjectToolCallsHidesRawOutputText(t *testing.T) {
+	out := BuildOpenAIResponseObject(
+		"resp_2",
+		"gpt-4o",
+		"prompt",
+		"",
+		`{"tool_calls":[{"name":"search","input":{"q":"go"}}]}`,
+		[]string{"search"},
+	)
+	if out["output_text"] != "" {
+		t.Fatalf("expected empty output_text for tool_calls, got %#v", out["output_text"])
+	}
+	output, _ := out["output"].([]any)
+	if len(output) == 0 {
+		t.Fatalf("expected output entries")
+	}
+	first, _ := output[0].(map[string]any)
+	if first["type"] != "tool_calls" {
+		t.Fatalf("expected first output type tool_calls, got %#v", first["type"])
+	}
+}
+
 func TestBuildClaudeMessageResponseToolUse(t *testing.T) {
 	out := BuildClaudeMessageResponse(
 		"msg_1",

@@ -43,8 +43,12 @@ func BuildOpenAIChatCompletion(completionID, model, finalPrompt, finalThinking, 
 
 func BuildOpenAIResponseObject(responseID, model, finalPrompt, finalThinking, finalText string, toolNames []string) map[string]any {
 	detected := ParseToolCalls(finalText, toolNames)
+	exposedOutputText := finalText
 	output := make([]any, 0, 2)
 	if len(detected) > 0 {
+		// Keep structured tool output only; avoid leaking raw tool-call JSON
+		// into response.output_text for clients reading completed responses.
+		exposedOutputText = ""
 		toolCalls := make([]any, 0, len(detected))
 		for _, tc := range detected {
 			toolCalls = append(toolCalls, map[string]any{
@@ -88,7 +92,7 @@ func BuildOpenAIResponseObject(responseID, model, finalPrompt, finalThinking, fi
 		"status":      "completed",
 		"model":       model,
 		"output":      output,
-		"output_text": finalText,
+		"output_text": exposedOutputText,
 		"usage": map[string]any{
 			"input_tokens":  promptTokens,
 			"output_tokens": reasoningTokens + completionTokens,
