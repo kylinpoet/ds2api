@@ -38,6 +38,12 @@ const CONFIG = {
   staticAdminDir: process.env.DS2API_STATIC_ADMIN_DIR || join(__dirname, 'static', 'admin'),
 };
 
+// 国内镜像配置
+const MIRRORS = {
+  goproxy: process.env.GOPROXY || 'https://goproxy.cn,direct',
+  npm: process.env.NPM_REGISTRY || 'https://registry.npmmirror.com',
+};
+
 // 存储子进程
 const processes = [];
 
@@ -206,9 +212,9 @@ async function installFrontendDeps() {
     log.warn('webui 目录不存在，跳过前端依赖安装');
     return;
   }
-  log.info('安装前端依赖 (npm ci)...');
+  log.info(`安装前端依赖 (npm ci, registry: ${MIRRORS.npm})...`);
   return new Promise((resolve, reject) => {
-    const proc = spawn('npm', ['ci'], {
+    const proc = spawn('npm', ['ci', '--registry', MIRRORS.npm], {
       cwd: CONFIG.webuiDir,
       stdio: 'inherit',
       shell: true,
@@ -228,12 +234,13 @@ async function ensureFrontendDeps() {
 // 编译后端二进制
 async function buildBackend() {
   if (!checkGo()) throw new Error('未找到 Go，请先安装 Go (https://go.dev/dl/)');
-  log.info('编译后端二进制...');
+  log.info(`编译后端二进制 (GOPROXY: ${MIRRORS.goproxy})...`);
   return new Promise((resolve, reject) => {
     const proc = spawn('go', ['build', '-o', BINARY, './cmd/ds2api'], {
       cwd: __dirname,
       stdio: 'inherit',
       shell: true,
+      env: { ...process.env, GOPROXY: MIRRORS.goproxy },
     });
     proc.on('close', code => code === 0 ? resolve() : reject(new Error('后端编译失败')));
   });
@@ -269,6 +276,7 @@ async function startBackendDev() {
       PORT: CONFIG.port,
       LOG_LEVEL: CONFIG.logLevel,
       DS2API_ADMIN_KEY: CONFIG.adminKey,
+      GOPROXY: MIRRORS.goproxy,
     },
   });
   processes.push(proc);
@@ -371,6 +379,8 @@ async function showMenu() {
   console.log(`  PORT:              ${colors.cyan}${CONFIG.port}${colors.reset}`);
   console.log(`  LOG_LEVEL:         ${colors.cyan}${CONFIG.logLevel}${colors.reset}`);
   console.log(`  DS2API_ADMIN_KEY:  ${colors.cyan}${CONFIG.adminKey}${colors.reset}`);
+  console.log(`  GOPROXY:           ${colors.cyan}${MIRRORS.goproxy}${colors.reset}`);
+  console.log(`  NPM_REGISTRY:      ${colors.cyan}${MIRRORS.npm}${colors.reset}`);
   console.log(`${colors.dim}  自定义: DS2API_ADMIN_KEY=密钥 PORT=5001 node start.mjs${colors.reset}`);
 
   console.log(`
@@ -535,9 +545,12 @@ ${colors.cyan}常用环境变量:${colors.reset}
   LOG_LEVEL          日志级别: DEBUG|INFO|WARN|ERROR (默认: INFO)
   DS2API_ADMIN_KEY   管理员密钥 (默认: admin)
   DS2API_CONFIG_PATH 配置文件路径 (默认: config.json)
+  GOPROXY            Go 模块代理 (默认: https://goproxy.cn,direct)
+  NPM_REGISTRY       npm 镜像源 (默认: https://registry.npmmirror.com)
 
 ${colors.cyan}示例:${colors.reset}
   DS2API_ADMIN_KEY=mykey PORT=8080 node start.mjs dev
+  GOPROXY=off NPM_REGISTRY=https://registry.npmjs.org node start.mjs dev
 `);
       break;
 
