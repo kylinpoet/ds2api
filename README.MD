@@ -283,6 +283,9 @@ cp opencode.json.example opencode.json
 | `DS2API_ACCOUNT_QUEUE_SIZE` | 同上（兼容旧名） | — |
 | `DS2API_VERCEL_INTERNAL_SECRET` | Vercel 混合流式内部鉴权密钥 | 回退用 `DS2API_ADMIN_KEY` |
 | `DS2API_VERCEL_STREAM_LEASE_TTL_SECONDS` | 流式 lease 过期秒数 | `900` |
+| `DS2API_DEV_PACKET_CAPTURE` | 本地开发抓包开关（记录最近会话请求/响应体） | 本地非 Vercel 默认开启 |
+| `DS2API_DEV_PACKET_CAPTURE_LIMIT` | 本地抓包保留条数（超出自动淘汰） | `5` |
+| `DS2API_DEV_PACKET_CAPTURE_MAX_BODY_BYTES` | 单条响应体最大记录字节数 | `2097152` |
 | `VERCEL_TOKEN` | Vercel 同步 token | — |
 | `VERCEL_PROJECT_ID` | Vercel 项目 ID | — |
 | `VERCEL_TEAM_ID` | Vercel 团队 ID | — |
@@ -320,6 +323,29 @@ cp opencode.json.example opencode.json
 2. 一旦命中高置信特征（`tool_calls` + `name` + `arguments/input` 起始）就立即输出 `delta.tool_calls`
 3. 已确认的 toolcall JSON 片段不会泄漏到 `delta.content`
 4. 前文/后文自然语言保持顺序透传，支持混合文本与增量参数输出
+
+## 本地开发抓包工具
+
+用于定位「responses 思考流/工具调用」等问题。开启后会自动记录最近 N 条 DeepSeek 对话上游请求体与响应体（默认 5 条，超出自动淘汰）。
+
+启用示例：
+
+```bash
+DS2API_DEV_PACKET_CAPTURE=true \
+DS2API_DEV_PACKET_CAPTURE_LIMIT=5 \
+go run ./cmd/ds2api
+```
+
+查询/清空（需 Admin JWT）：
+
+- `GET /admin/dev/captures`：查看抓包列表（最新在前）
+- `DELETE /admin/dev/captures`：清空抓包
+
+返回字段包含：
+
+- `request_body`：发送给 DeepSeek 的完整请求体
+- `response_body`：上游返回的原始流式内容拼接文本
+- `response_truncated`：是否触发单条大小截断
 
 ## 项目结构
 
