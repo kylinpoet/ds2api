@@ -42,6 +42,16 @@ export default function ApiTester({ config, onMessage, authFetch }) {
 
     const apiFetch = authFetch || fetch
     const accounts = config.accounts || []
+    const resolveAccountIdentifier = (acc) => {
+        if (!acc || typeof acc !== 'object') return ''
+        return String(acc.identifier || acc.email || acc.mobile || '').trim()
+    }
+    const configuredKeys = config.keys || []
+    const trimmedApiKey = apiKey.trim()
+    const defaultKey = configuredKeys[0] || ''
+    const effectiveKey = trimmedApiKey || defaultKey
+    const customKeyActive = trimmedApiKey !== ''
+    const customKeyManaged = customKeyActive && configuredKeys.includes(trimmedApiKey)
     const models = [
         { id: "deepseek-chat", name: "deepseek-chat", icon: MessageSquare, desc: t('apiTester.models.chat'), color: "text-amber-500" },
         { id: "deepseek-reasoner", name: "deepseek-reasoner", icon: Cpu, desc: t('apiTester.models.reasoner'), color: "text-amber-600" },
@@ -58,8 +68,32 @@ export default function ApiTester({ config, onMessage, authFetch }) {
         setIsStreaming(false)
     }
 
+    const extractErrorMessage = async (res) => {
+        let raw = ''
+        try {
+            raw = await res.text()
+        } catch {
+            return t('apiTester.requestFailed')
+        }
+        if (!raw) {
+            return t('apiTester.requestFailed')
+        }
+        try {
+            const data = JSON.parse(raw)
+            const fromErrorObject = data?.error?.message
+            const fromErrorString = typeof data?.error === 'string' ? data.error : ''
+            const detail = typeof data?.detail === 'string' ? data.detail : ''
+            const message = typeof data?.message === 'string' ? data.message : ''
+            return fromErrorObject || fromErrorString || detail || message || t('apiTester.requestFailed')
+        } catch {
+            return raw.length > 240 ? `${raw.slice(0, 240)}...` : raw
+        }
+    }
+
     const runTest = async () => {
         if (loading) return
+
+        const startedAt = Date.now()
 
         setLoading(true)
         setIsStreaming(true)
@@ -70,8 +104,7 @@ export default function ApiTester({ config, onMessage, authFetch }) {
         abortControllerRef.current = new AbortController()
 
         try {
-            const key = apiKey || (config.keys?.[0] || '')
-            if (!key) {
+            if (!effectiveKey) {
                 onMessage('error', t('apiTester.missingApiKey'))
                 setLoading(false)
                 setIsStreaming(false)
@@ -80,13 +113,14 @@ export default function ApiTester({ config, onMessage, authFetch }) {
 
             const headers = {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${key}`,
+                'Authorization': `Bearer ${effectiveKey}`,
             }
             if (selectedAccount) {
                 headers['X-Ds2-Target-Account'] = selectedAccount
             }
 
-            const res = await fetch('/v1/chat/completions', {
+            const endpoint = streamingMode ? '/v1/chat/completions' : '/v1/chat/completions?__go=1'
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
@@ -98,8 +132,7 @@ export default function ApiTester({ config, onMessage, authFetch }) {
             })
 
             if (!res.ok) {
-                const data = await res.json().catch(() => ({}))
-                const errorMsg = data.error?.message || t('apiTester.requestFailed')
+                const errorMsg = await extractErrorMessage(res)
                 setResponse({ success: false, error: errorMsg })
                 onMessage('error', errorMsg)
                 setLoading(false)
@@ -149,7 +182,8 @@ export default function ApiTester({ config, onMessage, authFetch }) {
             } else {
                 const data = await res.json()
                 setResponse({ success: true, status_code: res.status, ...data })
-                onMessage('success', t('apiTester.testSuccess', { account: selectedAccount || 'Auto', time: 'N/A' }))
+                const elapsed = Math.max(0, Date.now() - startedAt)
+                onMessage('success', t('apiTester.testSuccess', { account: selectedAccount || 'Auto', time: elapsed }))
             }
         } catch (e) {
             if (e.name === 'AbortError') {
@@ -267,11 +301,15 @@ return (
                                 onChange={e => setSelectedAccount(e.target.value)}
                             >
                                 <option value="" className="bg-popover text-popover-foreground">{t('apiTester.autoRandom')}</option>
-                                {accounts.map((acc, i) => (
-                                    <option key={i} value={acc.email || acc.mobile} className="bg-popover text-popover-foreground">
-                                        👤 {acc.email || acc.mobile}
-                                    </option>
-                                ))}
+                                {accounts.map((acc, i) => {
+                                    const id = resolveAccountIdentifier(acc)
+                                    if (!id) return null
+                                    return (
+                                        <option key={i} value={id} className="bg-popover text-popover-foreground">
+                                            👤 {id}
+                                        </option>
+                                    )
+                                })}
                             </select>
                             <ChevronDown className="absolute right-2.5 top-3 w-4 h-4 text-muted-foreground pointer-events-none" />
                         </div>
@@ -280,12 +318,22 @@ return (
                     <div className="space-y-2">
                         <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider ml-0.5">{t('apiTester.apiKeyOptional')}</label>
                         <input
-                            type="password"
+                            type="text"
+                            autoComplete="off"
+                            spellCheck={false}
                             className="w-full h-10 px-3 bg-muted/30 border border-border rounded-lg text-sm font-mono placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-all"
                             placeholder={config.keys?.[0] ? t('apiTester.apiKeyDefault', { suffix: config.keys[0].slice(-6) }) : t('apiTester.apiKeyPlaceholder')}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                         />
+                        {customKeyActive && (
+                            <p className={clsx(
+                                "text-[11px] mt-1",
+                                customKeyManaged ? "text-emerald-600" : "text-amber-600"
+                            )}>
+                                {customKeyManaged ? t('apiTester.modeManaged') : t('apiTester.modeDirect')}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>

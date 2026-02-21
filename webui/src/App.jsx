@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
     Routes,
     Route,
@@ -11,6 +11,7 @@ import {
     Key,
     Upload,
     Cloud,
+    Settings as SettingsIcon,
     LogOut,
     Menu,
     X,
@@ -23,25 +24,27 @@ import AccountManager from './components/AccountManager'
 import ApiTester from './components/ApiTester'
 import BatchImport from './components/BatchImport'
 import VercelSync from './components/VercelSync'
+import Settings from './components/Settings'
 import Login from './components/Login'
 import LandingPage from './components/LandingPage'
 import LanguageToggle from './components/LanguageToggle'
 import { useI18n } from './i18n'
+import { detectRuntimeEnv } from './utils/runtimeEnv'
 
-function Dashboard({ token, onLogout, config, fetchConfig, showMessage, message }) {
+function Dashboard({ token, onLogout, config, fetchConfig, showMessage, message, onForceLogout, isVercel }) {
     const { t } = useI18n()
     const [activeTab, setActiveTab] = useState('accounts')
     const [sidebarOpen, setSidebarOpen] = useState(false)
-    const [loading, setLoading] = useState(false)
 
     const navItems = [
         { id: 'accounts', label: t('nav.accounts.label'), icon: Users, description: t('nav.accounts.desc') },
         { id: 'test', label: t('nav.test.label'), icon: Server, description: t('nav.test.desc') },
         { id: 'import', label: t('nav.import.label'), icon: Upload, description: t('nav.import.desc') },
         { id: 'vercel', label: t('nav.vercel.label'), icon: Cloud, description: t('nav.vercel.desc') },
+        { id: 'settings', label: t('nav.settings.label'), icon: SettingsIcon, description: t('nav.settings.desc') },
     ]
 
-    const authFetch = async (url, options = {}) => {
+    const authFetch = useCallback(async (url, options = {}) => {
         const headers = {
             ...options.headers,
             'Authorization': `Bearer ${token}`
@@ -53,7 +56,7 @@ function Dashboard({ token, onLogout, config, fetchConfig, showMessage, message 
             throw new Error(t('auth.expired'))
         }
         return res
-    }
+    }, [onLogout, t, token])
 
     const renderTab = () => {
         switch (activeTab) {
@@ -64,7 +67,9 @@ function Dashboard({ token, onLogout, config, fetchConfig, showMessage, message 
             case 'import':
                 return <BatchImport onRefresh={fetchConfig} onMessage={showMessage} authFetch={authFetch} />
             case 'vercel':
-                return <VercelSync onMessage={showMessage} authFetch={authFetch} />
+                return <VercelSync onMessage={showMessage} authFetch={authFetch} isVercel={isVercel} />
+            case 'settings':
+                return <Settings onRefresh={fetchConfig} onMessage={showMessage} authFetch={authFetch} onForceLogout={onForceLogout} isVercel={isVercel} />
             default:
                 return null
         }
@@ -208,13 +213,27 @@ export default function App() {
     const navigate = useNavigate()
     const location = useLocation()
     const [config, setConfig] = useState({ keys: [], accounts: [] })
-    const [loading, setLoading] = useState(true)
     const [message, setMessage] = useState(null)
     const [token, setToken] = useState(null)
     const [authChecking, setAuthChecking] = useState(true)
 
     const isProduction = import.meta.env.MODE === 'production'
     const isAdminRoute = location.pathname.startsWith('/admin') || isProduction
+    const runtimeEnv = useMemo(() => detectRuntimeEnv(), [])
+    const isVercel = runtimeEnv.isVercel
+
+    const showMessage = useCallback((type, text) => {
+        setMessage({ type, text })
+        setTimeout(() => setMessage(null), 5000)
+    }, [])
+
+    const handleLogout = useCallback(() => {
+        setToken(null)
+        localStorage.removeItem('ds2api_token')
+        localStorage.removeItem('ds2api_token_expires')
+        sessionStorage.removeItem('ds2api_token')
+        sessionStorage.removeItem('ds2api_token_expires')
+    }, [])
 
     useEffect(() => {
         // Only check auth status on admin routes.
@@ -244,12 +263,11 @@ export default function App() {
             setAuthChecking(false)
         }
         checkAuth()
-    }, [isAdminRoute])
+    }, [handleLogout, isAdminRoute])
 
-    const fetchConfig = async () => {
+    const fetchConfig = useCallback(async () => {
         if (!token) return
         try {
-            setLoading(true)
             const res = await fetch('/admin/config', {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
@@ -260,32 +278,17 @@ export default function App() {
         } catch (e) {
             console.error('Failed to fetch config:', e)
             showMessage('error', t('errors.fetchConfig', { error: e.message }))
-        } finally {
-            setLoading(false)
         }
-    }
+    }, [showMessage, t, token])
 
     useEffect(() => {
         if (token) {
             fetchConfig()
         }
-    }, [token])
-
-    const showMessage = (type, text) => {
-        setMessage({ type, text })
-        setTimeout(() => setMessage(null), 5000)
-    }
+    }, [fetchConfig, token])
 
     const handleLogin = (newToken) => {
         setToken(newToken)
-    }
-
-    const handleLogout = () => {
-        setToken(null)
-        localStorage.removeItem('ds2api_token')
-        localStorage.removeItem('ds2api_token_expires')
-        sessionStorage.removeItem('ds2api_token')
-        sessionStorage.removeItem('ds2api_token_expires')
     }
 
     // Wait for auth checks on admin routes.
@@ -314,6 +317,8 @@ export default function App() {
                         fetchConfig={fetchConfig}
                         showMessage={showMessage}
                         message={message}
+                        onForceLogout={handleLogout}
+                        isVercel={isVercel}
                     />
                 ) : (
                     <div className="min-h-screen flex flex-col bg-background relative overflow-hidden">
