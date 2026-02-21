@@ -759,16 +759,18 @@ func TestHandleStreamMultiToolCallDoesNotMergeNamesOrArguments(t *testing.T) {
 	foundSearch := false
 	foundEval := false
 	foundIndex1 := false
-	maxToolCallsInDelta := 0
+	toolCallsDeltaLens := make([]int, 0, 2)
 	for _, frame := range frames {
 		choices, _ := frame["choices"].([]any)
 		for _, item := range choices {
 			choice, _ := item.(map[string]any)
 			delta, _ := choice["delta"].(map[string]any)
-			toolCalls, _ := delta["tool_calls"].([]any)
-			if len(toolCalls) > maxToolCallsInDelta {
-				maxToolCallsInDelta = len(toolCalls)
+			rawToolCalls, hasToolCalls := delta["tool_calls"]
+			if !hasToolCalls {
+				continue
 			}
+			toolCalls, _ := rawToolCalls.([]any)
+			toolCallsDeltaLens = append(toolCallsDeltaLens, len(toolCalls))
 			for _, tc := range toolCalls {
 				tcm, _ := tc.(map[string]any)
 				if idx, ok := tcm["index"].(float64); ok && int(idx) == 1 {
@@ -793,8 +795,8 @@ func TestHandleStreamMultiToolCallDoesNotMergeNamesOrArguments(t *testing.T) {
 	if !foundSearch || !foundEval {
 		t.Fatalf("expected both tool names in stream deltas, foundSearch=%v foundEval=%v body=%s", foundSearch, foundEval, rec.Body.String())
 	}
-	if maxToolCallsInDelta != 2 {
-		t.Fatalf("expected one tool_calls delta containing exactly two calls, max=%d body=%s", maxToolCallsInDelta, rec.Body.String())
+	if len(toolCallsDeltaLens) != 1 || toolCallsDeltaLens[0] != 2 {
+		t.Fatalf("expected exactly one tool_calls delta with two calls, got lens=%v body=%s", toolCallsDeltaLens, rec.Body.String())
 	}
 	if !foundIndex1 {
 		t.Fatalf("expected second tool call index in stream deltas, body=%s", rec.Body.String())
