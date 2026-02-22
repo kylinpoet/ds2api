@@ -161,7 +161,7 @@ Docker Compose includes a built-in health check:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-5001}/healthz"]
+  test: ["CMD", "/usr/local/bin/busybox", "wget", "-qO-", "http://localhost:${PORT:-5001}/healthz"]
   interval: 30s
   timeout: 10s
   retries: 3
