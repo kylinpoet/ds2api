@@ -31,6 +31,12 @@ jobs:
           cache: "npm"
           cache-dependency-path: webui/package-lock.json
 
+      - name: Release Blocking Gates
+        run: |
+          ./tests/scripts/check-stage6-manual-smoke.sh
+          ./tests/scripts/check-refactor-line-gate.sh
+          ./tests/scripts/run-unit-all.sh
+
       - name: Build WebUI
         run: |
           npm ci --prefix webui

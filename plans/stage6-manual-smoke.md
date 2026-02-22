@@ -27,3 +27,10 @@
 - Status: `PENDING`
 - Notes:
 
+## PASS Example
+
+- Date: 2026-02-22
+- Tester: release-maintainer
+- Environment: local macOS + latest Chrome
+- Status: `PASS`
+- Notes: login/account/api-tester/settings/vercel-sync smoke passed with no behavior regressions.

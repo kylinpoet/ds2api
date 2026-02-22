@@ -77,13 +77,7 @@ func (r *Runner) pruneOldRuns() error {
 }
 
 func (r *Runner) runPreflight(ctx context.Context) error {
-	steps := [][]string{
-		{"go", "test", "./...", "-count=1"},
-		{"node", "--check", "api/chat-stream.js"},
-		{"node", "--check", "api/helpers/stream-tool-sieve.js"},
-		{"node", "--test", "api/helpers/stream-tool-sieve.test.js", "api/chat-stream.test.js", "api/compat/js_compat_test.js"},
-		{"npm", "run", "build", "--prefix", "webui"},
-	}
+	steps := preflightSteps()
 	f, err := os.OpenFile(r.preflightLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
@@ -101,6 +95,15 @@ func (r *Runner) runPreflight(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func preflightSteps() [][]string {
+	return [][]string{
+		{"go", "test", "./...", "-count=1"},
+		{"./tests/scripts/check-node-split-syntax.sh"},
+		{"node", "--test", "api/helpers/stream-tool-sieve.test.js", "api/chat-stream.test.js", "api/compat/js_compat_test.js"},
+		{"npm", "run", "build", "--prefix", "webui"},
+	}
 }
 
 func (r *Runner) prepareConfigIsolation() error {

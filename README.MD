@@ -422,6 +422,14 @@ go run ./cmd/ds2api-tests \
   --retries 2
 ```
 
+```bash
+# 发布前阻断门禁
+./tests/scripts/check-stage6-manual-smoke.sh
+./tests/scripts/check-refactor-line-gate.sh
+./tests/scripts/run-unit-all.sh
+npm ci --prefix webui && npm run build --prefix webui
+```
+
 ## Release 自动构建（GitHub Actions）
 
 工作流文件：`.github/workflows/release-artifacts.yml`

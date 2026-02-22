@@ -422,6 +422,14 @@ go run ./cmd/ds2api-tests \
   --retries 2
 ```
 
+```bash
+# Release-blocking gates
+./tests/scripts/check-stage6-manual-smoke.sh
+./tests/scripts/check-refactor-line-gate.sh
+./tests/scripts/run-unit-all.sh
+npm ci --prefix webui && npm run build --prefix webui
+```
+
 ## Release Artifact Automation (GitHub Actions)
 
 Workflow: `.github/workflows/release-artifacts.yml`

@@ -1,0 +1,22 @@
+# Node split syntax gate targets
+# Keep this list in sync with api/chat-stream and api/helpers/stream-tool-sieve split modules.
+
+api/chat-stream.js
+api/chat-stream/index.js
+api/chat-stream/error_shape.js
+api/chat-stream/http_internal.js
+api/chat-stream/proxy_go.js
+api/chat-stream/sse_parse.js
+api/chat-stream/stream_emitter.js
+api/chat-stream/token_usage.js
+api/chat-stream/toolcall_policy.js
+api/chat-stream/vercel_stream.js
+
+api/helpers/stream-tool-sieve.js
+api/helpers/stream-tool-sieve/index.js
+api/helpers/stream-tool-sieve/state.js
+api/helpers/stream-tool-sieve/sieve.js
+api/helpers/stream-tool-sieve/incremental.js
+api/helpers/stream-tool-sieve/jsonscan.js
+api/helpers/stream-tool-sieve/parse.js
+api/helpers/stream-tool-sieve/format.js
