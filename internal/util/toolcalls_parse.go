@@ -92,17 +92,29 @@ func filterToolCallsDetailed(parsed []ParsedToolCall, availableToolNames []strin
 	for _, name := range availableToolNames {
 		allowed[name] = struct{}{}
 	}
+	if len(allowed) == 0 {
+		rejectedSet := map[string]struct{}{}
+		for _, tc := range parsed {
+			if tc.Name == "" {
+				continue
+			}
+			rejectedSet[tc.Name] = struct{}{}
+		}
+		rejected := make([]string, 0, len(rejectedSet))
+		for name := range rejectedSet {
+			rejected = append(rejected, name)
+		}
+		return nil, rejected
+	}
 	out := make([]ParsedToolCall, 0, len(parsed))
 	rejectedSet := map[string]struct{}{}
 	for _, tc := range parsed {
 		if tc.Name == "" {
 			continue
 		}
-		if len(allowed) > 0 {
-			if _, ok := allowed[tc.Name]; !ok {
-				rejectedSet[tc.Name] = struct{}{}
-				continue
-			}
+		if _, ok := allowed[tc.Name]; !ok {
+			rejectedSet[tc.Name] = struct{}{}
+			continue
 		}
 		if tc.Input == nil {
 			tc.Input = map[string]any{}

@@ -188,6 +188,10 @@ func stringifyToolCallArguments(v any) string {
 		if s == "" {
 			return "{}"
 		}
+		s = normalizeToolArgumentString(s)
+		if s == "" {
+			return "{}"
+		}
 		return s
 	default:
 		b, err := json.Marshal(x)

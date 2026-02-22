@@ -60,6 +60,20 @@ func TestParseToolCallsDetailedMarksPolicyRejection(t *testing.T) {
 	}
 }
 
+func TestParseToolCallsDetailedRejectsWhenAllowListEmpty(t *testing.T) {
+	text := `{"tool_calls":[{"name":"search","input":{"q":"go"}}]}`
+	res := ParseToolCallsDetailed(text, nil)
+	if !res.SawToolCallSyntax {
+		t.Fatalf("expected SawToolCallSyntax=true, got %#v", res)
+	}
+	if !res.RejectedByPolicy {
+		t.Fatalf("expected RejectedByPolicy=true, got %#v", res)
+	}
+	if len(res.Calls) != 0 {
+		t.Fatalf("expected no calls when allow-list is empty, got %#v", res.Calls)
+	}
+}
+
 func TestFormatOpenAIToolCalls(t *testing.T) {
 	formatted := FormatOpenAIToolCalls([]ParsedToolCall{{Name: "search", Input: map[string]any{"q": "x"}}})
 	if len(formatted) != 1 {

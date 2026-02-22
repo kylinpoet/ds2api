@@ -151,3 +151,30 @@ func TestNormalizeOpenAIResponsesRequestToolChoiceForcedUndeclaredFails(t *testi
 		t.Fatalf("expected forced undeclared tool to fail")
 	}
 }
+
+func TestNormalizeOpenAIResponsesRequestToolChoiceNoneDisablesTools(t *testing.T) {
+	store := newEmptyStoreForNormalizeTest(t)
+	req := map[string]any{
+		"model": "gpt-4o",
+		"input": "ping",
+		"tools": []any{
+			map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name": "search",
+				},
+			},
+		},
+		"tool_choice": "none",
+	}
+	n, err := normalizeOpenAIResponsesRequest(store, req, "")
+	if err != nil {
+		t.Fatalf("normalize failed: %v", err)
+	}
+	if n.ToolChoice.Mode != util.ToolChoiceNone {
+		t.Fatalf("expected tool choice mode none, got %q", n.ToolChoice.Mode)
+	}
+	if len(n.ToolNames) != 0 {
+		t.Fatalf("expected no tool names when tool_choice=none, got %#v", n.ToolNames)
+	}
+}

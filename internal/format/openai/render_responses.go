@@ -21,12 +21,6 @@ func BuildResponseObject(responseID, model, finalPrompt, finalThinking, finalTex
 	output := make([]any, 0, 2)
 	if len(detected) > 0 {
 		exposedOutputText = ""
-		if strings.TrimSpace(finalThinking) != "" {
-			output = append(output, map[string]any{
-				"type": "reasoning",
-				"text": finalThinking,
-			})
-		}
 		output = append(output, toResponsesFunctionCallItems(detected)...)
 	} else {
 		content := make([]any, 0, 2)
@@ -52,6 +46,21 @@ func BuildResponseObject(responseID, model, finalPrompt, finalThinking, finalTex
 			"content": content,
 		})
 	}
+	return BuildResponseObjectFromItems(
+		responseID,
+		model,
+		finalPrompt,
+		finalThinking,
+		finalText,
+		output,
+		exposedOutputText,
+	)
+}
+
+func BuildResponseObjectFromItems(responseID, model, finalPrompt, finalThinking, finalText string, output []any, outputText string) map[string]any {
+	if output == nil {
+		output = []any{}
+	}
 	return map[string]any{
 		"id":          responseID,
 		"type":        "response",
@@ -60,7 +69,7 @@ func BuildResponseObject(responseID, model, finalPrompt, finalThinking, finalTex
 		"status":      "completed",
 		"model":       model,
 		"output":      output,
-		"output_text": exposedOutputText,
+		"output_text": outputText,
 		"usage":       BuildResponsesUsage(finalPrompt, finalThinking, finalText),
 	}
 }

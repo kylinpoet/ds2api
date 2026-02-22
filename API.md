@@ -304,7 +304,7 @@ event: response.content_part.added
 data: {"type":"response.content_part.added","response_id":"resp_xxx","part":{"type":"output_text",...},...}
 
 event: response.output_text.delta
-data: {"type":"response.output_text.delta","id":"resp_xxx","delta":"..."}
+data: {"type":"response.output_text.delta","response_id":"resp_xxx","item_id":"msg_xxx","output_index":0,"content_index":0,"delta":"..."}
 
 event: response.function_call_arguments.delta
 data: {"type":"response.function_call_arguments.delta","response_id":"resp_xxx","call_id":"call_xxx","delta":"..."}

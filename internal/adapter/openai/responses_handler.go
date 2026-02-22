@@ -190,7 +190,8 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 }
 
 func logResponsesToolPolicyRejection(traceID string, policy util.ToolChoicePolicy, parsed util.ToolCallParseResult, channel string) {
-	if !parsed.RejectedByPolicy || len(parsed.RejectedToolNames) == 0 {
+	rejected := filteredRejectedToolNamesForLog(parsed.RejectedToolNames)
+	if !parsed.RejectedByPolicy || len(rejected) == 0 {
 		return
 	}
 	config.Logger.Warn(
@@ -198,6 +199,23 @@ func logResponsesToolPolicyRejection(traceID string, policy util.ToolChoicePolic
 		"trace_id", strings.TrimSpace(traceID),
 		"channel", channel,
 		"tool_choice_mode", policy.Mode,
-		"rejected_tool_names", strings.Join(parsed.RejectedToolNames, ","),
+		"rejected_tool_names", strings.Join(rejected, ","),
 	)
+}
+
+func filteredRejectedToolNamesForLog(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		switch strings.ToLower(trimmed) {
+		case "", "tool_name":
+			continue
+		default:
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

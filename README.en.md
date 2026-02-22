@@ -8,13 +8,13 @@
 
 Language: [中文](README.MD) | [English](README.en.md)
 
-DS2API converts DeepSeek Web chat capability into OpenAI-compatible and Claude-compatible APIs. The backend is a **pure Go implementation**, with a React WebUI admin panel (source in `webui/`, build output auto-generated to `static/admin` during deployment).
+DS2API converts DeepSeek Web chat capability into OpenAI-compatible, Claude-compatible, and Gemini-compatible APIs. The backend is a **pure Go implementation**, with a React WebUI admin panel (source in `webui/`, build output auto-generated to `static/admin` during deployment).
 
 ## Architecture Overview
 
 ```mermaid
 flowchart LR
-    Client["🖥️ Clients\n(OpenAI / Claude compat)"]
+    Client["🖥️ Clients\n(OpenAI / Claude / Gemini compat)"]
 
     subgraph DS2API["DS2API Service"]
         direction TB
@@ -24,6 +24,7 @@ flowchart LR
         subgraph Adapters["Adapter Layer"]
             OA["OpenAI Adapter\n/v1/*"]
             CA["Claude Adapter\n/anthropic/*"]
+            GA["Gemini Adapter\n/v1beta/models/*"]
         end
 
         subgraph Support["Support Modules"]
@@ -38,11 +39,11 @@ flowchart LR
     DS["☁️ DeepSeek API"]
 
     Client -- "Request" --> CORS --> Auth
-    Auth --> OA & CA
-    OA & CA -- "Call" --> DS
+    Auth --> OA & CA & GA
+    OA & CA & GA -- "Call" --> DS
     Auth --> Admin
-    OA & CA -. "Rotate accounts" .-> Pool
-    OA & CA -. "Compute PoW" .-> PoW
+    OA & CA & GA -. "Rotate accounts" .-> Pool
+    OA & CA & GA -. "Compute PoW" .-> PoW
     DS -- "Response" --> Client
 ```
 
@@ -55,12 +56,13 @@ flowchart LR
 | Capability | Details |
 | --- | --- |
 | OpenAI compatible | `GET /v1/models`, `GET /v1/models/{id}`, `POST /v1/chat/completions`, `POST /v1/responses`, `GET /v1/responses/{response_id}`, `POST /v1/embeddings` |
-| Claude compatible | `GET /anthropic/v1/models`, `POST /anthropic/v1/messages`, `POST /anthropic/v1/messages/count_tokens` |
+| Claude compatible | `GET /anthropic/v1/models`, `POST /anthropic/v1/messages`, `POST /anthropic/v1/messages/count_tokens` (plus shortcut paths `/v1/messages`, `/messages`) |
+| Gemini compatible | `POST /v1beta/models/{model}:generateContent`, `POST /v1beta/models/{model}:streamGenerateContent` (plus `/v1/models/{model}:*` paths) |
 | Multi-account rotation | Auto token refresh, email/mobile dual login |
 | Concurrency control | Per-account in-flight limit + waiting queue, dynamic recommended concurrency |
 | DeepSeek PoW | WASM solving via `wazero`, no external Node.js dependency |
 | Tool Calling | Anti-leak handling: non-code-block feature match, early `delta.tool_calls`, structured incremental output |
-| Admin API | Config management, account testing/batch test, import/export, Vercel sync |
+| Admin API | Config management, runtime settings hot-reload, account testing/batch test, import/export, Vercel sync |
 | WebUI Admin Panel | SPA at `/admin` (bilingual Chinese/English, dark mode) |
 | Health Probes | `GET /healthz` (liveness), `GET /readyz` (readiness) |
 
@@ -72,6 +74,7 @@ flowchart LR
 | P0 | OpenAI SDK (JS/Python, chat + responses) | ✅ |
 | P0 | Vercel AI SDK (openai-compatible) | ✅ |
 | P0 | Anthropic SDK (messages) | ✅ |
+| P0 | Google Gemini SDK (generateContent) | ✅ |
 | P1 | LangChain / LlamaIndex / OpenWebUI (OpenAI-compatible integration) | ✅ |
 | P2 | MCP standalone bridge | Planned |
 
@@ -96,6 +99,10 @@ flowchart LR
 
 Override mapping via `claude_mapping` or `claude_model_mapping` in config.
 In addition, `/anthropic/v1/models` now includes historical Claude 1.x/2.x/3.x/4.x IDs and common aliases for legacy client compatibility.
+
+### Gemini Endpoint
+
+The Gemini adapter maps model names to DeepSeek native models via `model_aliases` or built-in heuristics, supporting both `generateContent` and `streamGenerateContent` call patterns with full Tool Calling support (`functionDeclarations` → `functionCall` output).
 
 ## Quick Start
 
@@ -249,6 +256,14 @@ cp opencode.json.example opencode.json
   "claude_model_mapping": {
     "fast": "deepseek-chat",
     "slow": "deepseek-reasoner"
+  },
+  "admin": {
+    "jwt_expire_hours": 24
+  },
+  "runtime": {
+    "account_max_inflight": 2,
+    "account_max_queue": 0,
+    "global_max_inflight": 0
   }
 }
 ```
@@ -262,6 +277,8 @@ cp opencode.json.example opencode.json
 - `responses.store_ttl_seconds`: In-memory TTL for `/v1/responses/{id}`
 - `embeddings.provider`: Embeddings provider (`deterministic/mock/builtin` built-in)
 - `claude_model_mapping`: Maps `fast`/`slow` suffixes to corresponding DeepSeek models
+- `admin`: Admin panel settings (JWT expiry, password hash, etc.), hot-reloadable via Admin Settings API
+- `runtime`: Runtime parameters (concurrency limits, queue sizes), hot-reloadable via Admin Settings API
 
 ### Environment Variables
 
@@ -293,7 +310,7 @@ cp opencode.json.example opencode.json
 
 ## Authentication Modes
 
-For business endpoints (`/v1/*`, `/anthropic/*`), DS2API supports two modes:
+For business endpoints (`/v1/*`, `/anthropic/*`, Gemini routes), DS2API supports two modes:
 
 | Mode | Description |
 | --- | --- |
@@ -320,10 +337,10 @@ Queue limit = DS2API_ACCOUNT_MAX_QUEUE (default = recommended concurrency)
 When `tools` is present in the request, DS2API performs anti-leak handling:
 
 1. Toolcall feature matching is enabled only in **non-code-block context** (fenced examples are ignored)
-2. In `responses` stream mode, tool calls follow official item lifecycle events (`response.output_item.*`, `response.content_part.*`, `response.function_call_arguments.*`)
-3. Unknown tool names (outside declared `tools`) are rejected and are not emitted as valid tool calls
-4. `tool_choice` is enforced on `responses` (`auto`/`none`/`required`/forced function); required violations return HTTP `422` (non-stream) or `response.failed` (stream)
-5. Confirmed toolcall JSON fragments are never emitted as valid tool call events unless they pass policy checks
+2. `responses` streaming strictly uses official item lifecycle events (`response.output_item.*`, `response.content_part.*`, `response.function_call_arguments.*`)
+3. Tool names not declared in the `tools` schema are strictly rejected and will not be emitted as valid tool calls
+4. `responses` supports and enforces `tool_choice` (`auto`/`none`/`required`/forced function); `required` violations return `422` for non-stream and `response.failed` for stream
+5. Valid tool call events are only emitted after passing policy validation, preventing invalid tool names from entering the client execution chain
 
 ## Local Dev Packet Capture
 
@@ -363,13 +380,20 @@ ds2api/
 │   ├── account/             # Account pool and concurrency queue
 │   ├── adapter/
 │   │   ├── openai/          # OpenAI adapter (incl. tool call parsing, Vercel stream prepare/release)
-│   │   └── claude/          # Claude adapter
-│   ├── admin/               # Admin API handlers
+│   │   ├── claude/          # Claude adapter
+│   │   └── gemini/          # Gemini adapter (generateContent / streamGenerateContent)
+│   ├── admin/               # Admin API handlers (incl. Settings hot-reload)
 │   ├── auth/                # Auth and JWT
+│   ├── claudeconv/          # Claude message format conversion
+│   ├── compat/              # Compatibility helpers
 │   ├── config/              # Config loading and hot-reload
 │   ├── deepseek/            # DeepSeek API client, PoW WASM
+│   ├── devcapture/          # Dev packet capture module
+│   ├── format/              # Output formatting
+│   ├── prompt/              # Prompt construction
 │   ├── server/              # HTTP routing and middleware (chi router)
 │   ├── sse/                 # SSE parsing utilities
+│   ├── stream/              # Unified stream consumption engine
 │   ├── util/                # Common utilities
 │   └── webui/               # WebUI static file serving and auto-build
 ├── webui/                   # React WebUI source (Vite + Tailwind)

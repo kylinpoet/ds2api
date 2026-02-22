@@ -59,12 +59,15 @@ func BuildResponsesContentPartDonePayload(responseID, itemID string, outputIndex
 	}
 }
 
-func BuildResponsesTextDeltaPayload(responseID, delta string) map[string]any {
+func BuildResponsesTextDeltaPayload(responseID, itemID string, outputIndex, contentIndex int, delta string) map[string]any {
 	return map[string]any{
-		"type":        "response.output_text.delta",
-		"id":          responseID,
-		"response_id": responseID,
-		"delta":       delta,
+		"type":          "response.output_text.delta",
+		"id":            responseID,
+		"response_id":   responseID,
+		"item_id":       itemID,
+		"output_index":  outputIndex,
+		"content_index": contentIndex,
+		"delta":         delta,
 	}
 }
 

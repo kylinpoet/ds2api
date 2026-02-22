@@ -135,6 +135,27 @@ func TestNormalizeResponsesInputAsMessagesFunctionCallItem(t *testing.T) {
 	}
 }
 
+func TestNormalizeResponsesInputAsMessagesFunctionCallItemRepairsConcatenatedArguments(t *testing.T) {
+	msgs := normalizeResponsesInputAsMessages([]any{
+		map[string]any{
+			"type":      "function_call",
+			"call_id":   "call_456",
+			"name":      "search",
+			"arguments": `{}{"q":"golang"}`,
+		},
+	})
+	if len(msgs) != 1 {
+		t.Fatalf("expected one message, got %d", len(msgs))
+	}
+	m, _ := msgs[0].(map[string]any)
+	toolCalls, _ := m["tool_calls"].([]any)
+	call, _ := toolCalls[0].(map[string]any)
+	fn, _ := call["function"].(map[string]any)
+	if fn["arguments"] != `{"q":"golang"}` {
+		t.Fatalf("expected concatenated call arguments repaired, got %#v", fn["arguments"])
+	}
+}
+
 func TestExtractEmbeddingInputs(t *testing.T) {
 	got := extractEmbeddingInputs([]any{"a", "b"})
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {

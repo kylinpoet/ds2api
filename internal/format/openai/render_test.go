@@ -138,15 +138,11 @@ func TestBuildResponseObjectDetectsToolCallFromThinkingChannel(t *testing.T) {
 	)
 
 	output, _ := obj["output"].([]any)
-	if len(output) != 2 {
-		t.Fatalf("expected reasoning + function_call outputs, got %#v", obj["output"])
+	if len(output) != 1 {
+		t.Fatalf("expected function_call output only, got %#v", obj["output"])
 	}
 	first, _ := output[0].(map[string]any)
-	if first["type"] != "reasoning" {
-		t.Fatalf("expected first output reasoning, got %#v", first["type"])
-	}
-	second, _ := output[1].(map[string]any)
-	if second["type"] != "function_call" {
-		t.Fatalf("expected second output function_call, got %#v", second["type"])
+	if first["type"] != "function_call" {
+		t.Fatalf("expected output function_call, got %#v", first["type"])
 	}
 }

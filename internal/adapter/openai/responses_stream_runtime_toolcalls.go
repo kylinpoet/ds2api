@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func (s *responsesStreamRuntime) allocateOutputIndex() int {
+	idx := s.nextOutputID
+	s.nextOutputID++
+	return idx
+}
+
 func (s *responsesStreamRuntime) ensureMessageItemID() string {
 	if strings.TrimSpace(s.messageItemID) != "" {
 		return s.messageItemID
@@ -19,11 +25,12 @@ func (s *responsesStreamRuntime) ensureMessageItemID() string {
 	return s.messageItemID
 }
 
-func (s *responsesStreamRuntime) messageOutputIndex() int {
-	if strings.TrimSpace(s.thinking.String()) != "" {
-		return 1
+func (s *responsesStreamRuntime) ensureMessageOutputIndex() int {
+	if s.messageOutputID >= 0 {
+		return s.messageOutputID
 	}
-	return 0
+	s.messageOutputID = s.allocateOutputIndex()
+	return s.messageOutputID
 }
 
 func (s *responsesStreamRuntime) ensureMessageItemAdded() {
@@ -39,7 +46,7 @@ func (s *responsesStreamRuntime) ensureMessageItemAdded() {
 	}
 	s.sendEvent(
 		"response.output_item.added",
-		openaifmt.BuildResponsesOutputItemAddedPayload(s.responseID, itemID, s.messageOutputIndex(), item),
+		openaifmt.BuildResponsesOutputItemAddedPayload(s.responseID, itemID, s.ensureMessageOutputIndex(), item),
 	)
 	s.messageAdded = true
 }
@@ -54,7 +61,7 @@ func (s *responsesStreamRuntime) ensureMessageContentPartAdded() {
 		openaifmt.BuildResponsesContentPartAddedPayload(
 			s.responseID,
 			s.ensureMessageItemID(),
-			s.messageOutputIndex(),
+			s.ensureMessageOutputIndex(),
 			0,
 			map[string]any{"type": "output_text", "text": ""},
 		),
@@ -68,7 +75,16 @@ func (s *responsesStreamRuntime) emitTextDelta(content string) {
 	}
 	s.ensureMessageContentPartAdded()
 	s.visibleText.WriteString(content)
-	s.sendEvent("response.output_text.delta", openaifmt.BuildResponsesTextDeltaPayload(s.responseID, content))
+	s.sendEvent(
+		"response.output_text.delta",
+		openaifmt.BuildResponsesTextDeltaPayload(
+			s.responseID,
+			s.ensureMessageItemID(),
+			s.ensureMessageOutputIndex(),
+			0,
+			content,
+		),
+	)
 }
 
 func (s *responsesStreamRuntime) closeMessageItem() {
@@ -76,6 +92,7 @@ func (s *responsesStreamRuntime) closeMessageItem() {
 		return
 	}
 	itemID := s.ensureMessageItemID()
+	outputIndex := s.ensureMessageOutputIndex()
 	text := s.visibleText.String()
 	if s.messagePartAdded {
 		s.sendEvent(
@@ -83,7 +100,7 @@ func (s *responsesStreamRuntime) closeMessageItem() {
 			openaifmt.BuildResponsesContentPartDonePayload(
 				s.responseID,
 				itemID,
-				s.messageOutputIndex(),
+				outputIndex,
 				0,
 				map[string]any{"type": "output_text", "text": text},
 			),
@@ -104,45 +121,35 @@ func (s *responsesStreamRuntime) closeMessageItem() {
 	}
 	s.sendEvent(
 		"response.output_item.done",
-		openaifmt.BuildResponsesOutputItemDonePayload(s.responseID, itemID, s.messageOutputIndex(), item),
+		openaifmt.BuildResponsesOutputItemDonePayload(s.responseID, itemID, outputIndex, item),
 	)
 }
 
-func (s *responsesStreamRuntime) ensureReasoningItemID() string {
-	if strings.TrimSpace(s.reasoningItemID) != "" {
-		return s.reasoningItemID
-	}
-	s.reasoningItemID = "rs_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	return s.reasoningItemID
-}
-
-func (s *responsesStreamRuntime) ensureFunctionItemID(index int) string {
-	if id, ok := s.streamFunctionIDs[index]; ok && strings.TrimSpace(id) != "" {
+func (s *responsesStreamRuntime) ensureFunctionItemID(callIndex int) string {
+	if id, ok := s.functionItemIDs[callIndex]; ok && strings.TrimSpace(id) != "" {
 		return id
 	}
 	id := "fc_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	s.streamFunctionIDs[index] = id
+	s.functionItemIDs[callIndex] = id
 	return id
 }
 
-func (s *responsesStreamRuntime) ensureToolCallID(index int) string {
-	if id, ok := s.streamToolCallIDs[index]; ok && strings.TrimSpace(id) != "" {
+func (s *responsesStreamRuntime) ensureToolCallID(callIndex int) string {
+	if id, ok := s.streamToolCallIDs[callIndex]; ok && strings.TrimSpace(id) != "" {
 		return id
 	}
 	id := "call_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	s.streamToolCallIDs[index] = id
+	s.streamToolCallIDs[callIndex] = id
 	return id
 }
 
-func (s *responsesStreamRuntime) functionOutputBaseIndex() int {
-	if strings.TrimSpace(s.thinking.String()) != "" {
-		return 1
+func (s *responsesStreamRuntime) ensureFunctionOutputIndex(callIndex int) int {
+	if idx, ok := s.functionOutputIDs[callIndex]; ok {
+		return idx
 	}
-	return 0
-}
-
-func (s *responsesStreamRuntime) functionOutputIndex(callIndex int) int {
-	return s.functionOutputBaseIndex() + callIndex
+	idx := s.allocateOutputIndex()
+	s.functionOutputIDs[callIndex] = idx
+	return idx
 }
 
 func (s *responsesStreamRuntime) ensureFunctionItemAdded(callIndex int, name string) {
@@ -156,15 +163,15 @@ func (s *responsesStreamRuntime) ensureFunctionItemAdded(callIndex int, name str
 	if fnName == "" {
 		return
 	}
-	outputIndex := s.functionOutputIndex(callIndex)
-	itemID := s.ensureFunctionItemID(outputIndex)
+	outputIndex := s.ensureFunctionOutputIndex(callIndex)
+	itemID := s.ensureFunctionItemID(callIndex)
 	callID := s.ensureToolCallID(callIndex)
 	item := map[string]any{
 		"id":        itemID,
 		"type":      "function_call",
 		"call_id":   callID,
 		"name":      fnName,
-		"arguments": "{}",
+		"arguments": "",
 		"status":    "in_progress",
 	}
 	s.sendEvent(
@@ -181,8 +188,8 @@ func (s *responsesStreamRuntime) emitFunctionCallDeltaEvents(deltas []toolCallDe
 		if strings.TrimSpace(d.Arguments) == "" {
 			continue
 		}
-		outputIndex := s.functionOutputIndex(d.Index)
-		itemID := s.ensureFunctionItemID(outputIndex)
+		outputIndex := s.ensureFunctionOutputIndex(d.Index)
+		itemID := s.ensureFunctionItemID(d.Index)
 		callID := s.ensureToolCallID(d.Index)
 		s.sendEvent(
 			"response.function_call_arguments.delta",
@@ -192,18 +199,16 @@ func (s *responsesStreamRuntime) emitFunctionCallDeltaEvents(deltas []toolCallDe
 }
 
 func (s *responsesStreamRuntime) emitFunctionCallDoneEvents(calls []util.ParsedToolCall) {
-	base := s.functionOutputBaseIndex()
 	for idx, tc := range calls {
 		if strings.TrimSpace(tc.Name) == "" {
 			continue
 		}
 		s.ensureFunctionItemAdded(idx, tc.Name)
-
-		outputIndex := base + idx
-		if s.functionDone[outputIndex] {
+		if s.functionDone[idx] {
 			continue
 		}
-		itemID := s.ensureFunctionItemID(outputIndex)
+		outputIndex := s.ensureFunctionOutputIndex(idx)
+		itemID := s.ensureFunctionItemID(idx)
 		callID := s.ensureToolCallID(idx)
 		argsBytes, _ := json.Marshal(tc.Input)
 		args := string(argsBytes)
@@ -223,48 +228,105 @@ func (s *responsesStreamRuntime) emitFunctionCallDoneEvents(calls []util.ParsedT
 			"response.output_item.done",
 			openaifmt.BuildResponsesOutputItemDonePayload(s.responseID, itemID, outputIndex, item),
 		)
-		s.functionDone[outputIndex] = true
+		s.functionDone[idx] = true
 		s.toolCallsDoneEmitted = true
 	}
 }
 
-func (s *responsesStreamRuntime) alignCompletedOutputCallIDs(obj map[string]any) {
-	if obj == nil || len(s.streamToolCallIDs) == 0 {
-		return
+func (s *responsesStreamRuntime) buildCompletedResponseObject(finalThinking, finalText string, calls []util.ParsedToolCall) map[string]any {
+	type indexedItem struct {
+		index int
+		item  map[string]any
 	}
-	output, _ := obj["output"].([]any)
-	if len(output) == 0 {
-		return
-	}
-	indices := make([]int, 0, len(s.streamToolCallIDs))
-	for idx := range s.streamToolCallIDs {
-		indices = append(indices, idx)
-	}
-	sort.Ints(indices)
-	ordered := make([]string, 0, len(indices))
-	for _, idx := range indices {
-		id := strings.TrimSpace(s.streamToolCallIDs[idx])
-		if id == "" {
-			continue
+	indexed := make([]indexedItem, 0, len(calls)+1)
+
+	if s.messageAdded {
+		text := s.visibleText.String()
+		indexed = append(indexed, indexedItem{
+			index: s.ensureMessageOutputIndex(),
+			item: map[string]any{
+				"id":     s.ensureMessageItemID(),
+				"type":   "message",
+				"role":   "assistant",
+				"status": "completed",
+				"content": []map[string]any{
+					{
+						"type": "output_text",
+						"text": text,
+					},
+				},
+			},
+		})
+	} else if len(calls) == 0 {
+		content := make([]map[string]any, 0, 2)
+		if strings.TrimSpace(finalThinking) != "" {
+			content = append(content, map[string]any{
+				"type": "reasoning",
+				"text": finalThinking,
+			})
 		}
-		ordered = append(ordered, id)
-	}
-	if len(ordered) == 0 {
-		return
+		if strings.TrimSpace(finalText) != "" {
+			content = append(content, map[string]any{
+				"type": "output_text",
+				"text": finalText,
+			})
+		}
+		if len(content) > 0 {
+			indexed = append(indexed, indexedItem{
+				index: s.ensureMessageOutputIndex(),
+				item: map[string]any{
+					"id":      s.ensureMessageItemID(),
+					"type":    "message",
+					"role":    "assistant",
+					"status":  "completed",
+					"content": content,
+				},
+			})
+		}
 	}
 
-	functionIdx := 0
-	for _, item := range output {
-		m, _ := item.(map[string]any)
-		if m == nil {
+	for idx, tc := range calls {
+		if strings.TrimSpace(tc.Name) == "" {
 			continue
 		}
-		if m["type"] != "function_call" {
-			continue
-		}
-		if functionIdx < len(ordered) {
-			m["call_id"] = ordered[functionIdx]
-			functionIdx++
+		argsBytes, _ := json.Marshal(tc.Input)
+		indexed = append(indexed, indexedItem{
+			index: s.ensureFunctionOutputIndex(idx),
+			item: map[string]any{
+				"id":        s.ensureFunctionItemID(idx),
+				"type":      "function_call",
+				"call_id":   s.ensureToolCallID(idx),
+				"name":      tc.Name,
+				"arguments": string(argsBytes),
+				"status":    "completed",
+			},
+		})
+	}
+
+	sort.SliceStable(indexed, func(i, j int) bool {
+		return indexed[i].index < indexed[j].index
+	})
+	output := make([]any, 0, len(indexed))
+	for _, it := range indexed {
+		output = append(output, it.item)
+	}
+
+	outputText := s.visibleText.String()
+	if strings.TrimSpace(outputText) == "" && len(calls) == 0 {
+		if strings.TrimSpace(finalText) != "" {
+			outputText = finalText
+		} else if strings.TrimSpace(finalThinking) != "" {
+			outputText = finalThinking
 		}
 	}
+
+	return openaifmt.BuildResponseObjectFromItems(
+		s.responseID,
+		s.model,
+		s.finalPrompt,
+		finalThinking,
+		finalText,
+		output,
+		outputText,
+	)
 }

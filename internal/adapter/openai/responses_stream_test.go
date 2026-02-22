@@ -109,6 +109,22 @@ func TestHandleResponsesStreamUsesOfficialOutputItemEvents(t *testing.T) {
 		t.Fatalf("legacy response.output_tool_call.* event must not appear, body=%s", body)
 	}
 
+	addedPayloads := extractAllSSEEventPayloads(body, "response.output_item.added")
+	hasFunctionCallAdded := false
+	for _, payload := range addedPayloads {
+		item, _ := payload["item"].(map[string]any)
+		if item == nil || asString(item["type"]) != "function_call" {
+			continue
+		}
+		hasFunctionCallAdded = true
+		if asString(item["arguments"]) != "" {
+			t.Fatalf("expected in-progress function_call.arguments to start empty string, got %#v", item["arguments"])
+		}
+	}
+	if !hasFunctionCallAdded {
+		t.Fatalf("expected function_call output_item.added payload, body=%s", body)
+	}
+
 	donePayload, ok := extractSSEEventPayload(body, "response.function_call_arguments.done")
 	if !ok {
 		t.Fatalf("expected to parse response.function_call_arguments.done payload, body=%s", body)
@@ -213,6 +229,137 @@ func TestHandleResponsesStreamMultiToolCallKeepsNameAndCallIDAligned(t *testing.
 	}
 }
 
+func TestHandleResponsesStreamOutputTextDeltaCarriesItemIndexes(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rec := httptest.NewRecorder()
+
+	sseLine := func(v string) string {
+		b, _ := json.Marshal(map[string]any{
+			"p": "response/content",
+			"v": v,
+		})
+		return "data: " + string(b) + "\n"
+	}
+
+	streamBody := sseLine("hello") + "data: [DONE]\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(streamBody)),
+	}
+
+	h.handleResponsesStream(rec, req, resp, "owner-a", "resp_test", "deepseek-chat", "prompt", false, false, nil, util.DefaultToolChoicePolicy(), "")
+	body := rec.Body.String()
+
+	deltaPayload, ok := extractSSEEventPayload(body, "response.output_text.delta")
+	if !ok {
+		t.Fatalf("expected response.output_text.delta payload, body=%s", body)
+	}
+	if strings.TrimSpace(asString(deltaPayload["item_id"])) == "" {
+		t.Fatalf("expected non-empty item_id in output_text.delta, payload=%#v", deltaPayload)
+	}
+	if _, ok := deltaPayload["output_index"]; !ok {
+		t.Fatalf("expected output_index in output_text.delta, payload=%#v", deltaPayload)
+	}
+	if _, ok := deltaPayload["content_index"]; !ok {
+		t.Fatalf("expected content_index in output_text.delta, payload=%#v", deltaPayload)
+	}
+}
+
+func TestHandleResponsesStreamThinkingTextAndToolUseDistinctOutputIndexes(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rec := httptest.NewRecorder()
+
+	sseLine := func(path, value string) string {
+		b, _ := json.Marshal(map[string]any{
+			"p": path,
+			"v": value,
+		})
+		return "data: " + string(b) + "\n"
+	}
+
+	streamBody := sseLine("response/thinking_content", "thinking...") +
+		sseLine("response/content", "先读取文件。") +
+		sseLine("response/content", `{"tool_calls":[{"name":"read_file","input":{"path":"README.MD"}}]}`) +
+		"data: [DONE]\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(streamBody)),
+	}
+
+	h.handleResponsesStream(rec, req, resp, "owner-a", "resp_test", "deepseek-reasoner", "prompt", true, false, []string{"read_file"}, util.DefaultToolChoicePolicy(), "")
+
+	addedPayloads := extractAllSSEEventPayloads(rec.Body.String(), "response.output_item.added")
+	if len(addedPayloads) < 2 {
+		t.Fatalf("expected message + function_call output_item.added events, got %d body=%s", len(addedPayloads), rec.Body.String())
+	}
+
+	indexes := map[int]struct{}{}
+	typeByIndex := map[int]string{}
+	addedIDs := map[string]string{}
+	for _, payload := range addedPayloads {
+		item, _ := payload["item"].(map[string]any)
+		itemType := strings.TrimSpace(asString(item["type"]))
+		outputIndex := int(asFloat(payload["output_index"]))
+		if _, exists := indexes[outputIndex]; exists {
+			t.Fatalf("found duplicated output_index=%d for item types=%q and %q payload=%#v", outputIndex, typeByIndex[outputIndex], itemType, payload)
+		}
+		indexes[outputIndex] = struct{}{}
+		typeByIndex[outputIndex] = itemType
+		addedIDs[itemType] = strings.TrimSpace(asString(payload["item_id"]))
+	}
+
+	completedPayload, ok := extractSSEEventPayload(rec.Body.String(), "response.completed")
+	if !ok {
+		t.Fatalf("expected response.completed payload, body=%s", rec.Body.String())
+	}
+	responseObj, _ := completedPayload["response"].(map[string]any)
+	output, _ := responseObj["output"].([]any)
+	found := map[string]bool{}
+	for _, item := range output {
+		m, _ := item.(map[string]any)
+		itemType := strings.TrimSpace(asString(m["type"]))
+		itemID := strings.TrimSpace(asString(m["id"]))
+		if itemType == "" || itemID == "" {
+			continue
+		}
+		if wantID := strings.TrimSpace(addedIDs[itemType]); wantID != "" && wantID == itemID {
+			found[itemType] = true
+		}
+	}
+	if !found["message"] || !found["function_call"] {
+		t.Fatalf("expected completed output to contain streamed message/function_call item ids, found=%#v output=%#v", found, output)
+	}
+}
+
+func TestHandleResponsesStreamToolChoiceNoneRejectsFunctionCall(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rec := httptest.NewRecorder()
+
+	sseLine := func(v string) string {
+		b, _ := json.Marshal(map[string]any{
+			"p": "response/content",
+			"v": v,
+		})
+		return "data: " + string(b) + "\n"
+	}
+
+	streamBody := sseLine(`{"tool_calls":[{"name":"read_file","input":{"path":"README.MD"}}]}`) + "data: [DONE]\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(streamBody)),
+	}
+	policy := util.ToolChoicePolicy{Mode: util.ToolChoiceNone}
+
+	h.handleResponsesStream(rec, req, resp, "owner-a", "resp_test", "deepseek-chat", "prompt", false, false, nil, policy, "")
+	body := rec.Body.String()
+	if strings.Contains(body, "event: response.function_call_arguments.done") {
+		t.Fatalf("did not expect function_call events for tool_choice=none, body=%s", body)
+	}
+}
+
 func TestHandleResponsesStreamRequiredToolChoiceFailure(t *testing.T) {
 	h := &Handler{}
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -299,6 +446,32 @@ func TestHandleResponsesNonStreamRequiredToolChoiceViolation(t *testing.T) {
 	}
 }
 
+func TestHandleResponsesNonStreamToolChoiceNoneRejectsFunctionCall(t *testing.T) {
+	h := &Handler{}
+	rec := httptest.NewRecorder()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`data: {"p":"response/content","v":"{\"tool_calls\":[{\"name\":\"read_file\",\"input\":{\"path\":\"README.MD\"}}]}"}` + "\n" +
+				`data: [DONE]` + "\n",
+		)),
+	}
+	policy := util.ToolChoicePolicy{Mode: util.ToolChoiceNone}
+
+	h.handleResponsesNonStream(rec, resp, "owner-a", "resp_test", "deepseek-chat", "prompt", false, nil, policy, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for tool_choice=none passthrough text, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	out := decodeJSONBody(t, rec.Body.String())
+	output, _ := out["output"].([]any)
+	for _, item := range output {
+		m, _ := item.(map[string]any)
+		if m != nil && m["type"] == "function_call" {
+			t.Fatalf("did not expect function_call output item for tool_choice=none, got %#v", output)
+		}
+	}
+}
+
 func extractSSEEventPayload(body, targetEvent string) (map[string]any, bool) {
 	scanner := bufio.NewScanner(strings.NewReader(body))
 	matched := false
@@ -350,4 +523,19 @@ func extractAllSSEEventPayloads(body, targetEvent string) []map[string]any {
 		out = append(out, payload)
 	}
 	return out
+}
+
+func asFloat(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return float64(x)
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	default:
+		return 0
+	}
 }

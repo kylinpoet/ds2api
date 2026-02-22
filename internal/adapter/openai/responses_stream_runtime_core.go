@@ -37,13 +37,14 @@ type responsesStreamRuntime struct {
 	text              strings.Builder
 	visibleText       strings.Builder
 	streamToolCallIDs map[int]string
-	streamFunctionIDs map[int]string
+	functionItemIDs   map[int]string
+	functionOutputIDs map[int]int
 	functionDone      map[int]bool
 	functionAdded     map[int]bool
 	functionNames     map[int]string
-	toolCallsDoneSigs map[string]bool
-	reasoningItemID   string
 	messageItemID     string
+	messageOutputID   int
+	nextOutputID      int
 	messageAdded      bool
 	messagePartAdded  bool
 	sequence          int
@@ -81,11 +82,12 @@ func newResponsesStreamRuntime(
 		bufferToolContent:   bufferToolContent,
 		emitEarlyToolDeltas: emitEarlyToolDeltas,
 		streamToolCallIDs:   map[int]string{},
-		streamFunctionIDs:   map[int]string{},
+		functionItemIDs:     map[int]string{},
+		functionOutputIDs:   map[int]int{},
 		functionDone:        map[int]bool{},
 		functionAdded:       map[int]bool{},
 		functionNames:       map[int]string{},
-		toolCallsDoneSigs:   map[string]bool{},
+		messageOutputID:     -1,
 		toolChoice:          toolChoice,
 		traceID:             traceID,
 		persistResponse:     persistResponse,
@@ -144,10 +146,7 @@ func (s *responsesStreamRuntime) finalize() {
 		return
 	}
 
-	obj := openaifmt.BuildResponseObject(s.responseID, s.model, s.finalPrompt, finalThinking, finalText, s.toolNames)
-	if s.toolCallsEmitted {
-		s.alignCompletedOutputCallIDs(obj)
-	}
+	obj := s.buildCompletedResponseObject(finalThinking, finalText, detected)
 	if s.persistResponse != nil {
 		s.persistResponse(obj)
 	}
@@ -157,7 +156,8 @@ func (s *responsesStreamRuntime) finalize() {
 
 func (s *responsesStreamRuntime) logToolPolicyRejections(textParsed, thinkingParsed util.ToolCallParseResult) {
 	logRejected := func(parsed util.ToolCallParseResult, channel string) {
-		if !parsed.RejectedByPolicy || len(parsed.RejectedToolNames) == 0 {
+		rejected := filteredRejectedToolNamesForLog(parsed.RejectedToolNames)
+		if !parsed.RejectedByPolicy || len(rejected) == 0 {
 			return
 		}
 		config.Logger.Warn(
@@ -165,7 +165,7 @@ func (s *responsesStreamRuntime) logToolPolicyRejections(textParsed, thinkingPar
 			"trace_id", strings.TrimSpace(s.traceID),
 			"channel", channel,
 			"tool_choice_mode", s.toolChoice.Mode,
-			"rejected_tool_names", strings.Join(parsed.RejectedToolNames, ","),
+			"rejected_tool_names", strings.Join(rejected, ","),
 		)
 	}
 	logRejected(textParsed, "text")
