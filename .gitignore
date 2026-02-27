@@ -42,6 +42,15 @@ ds2api-tests
 .env.local
 .env.*.local
 
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+*.coverprofile
+coverage*.out
+cover/
+
 # Misc
 .git/
 Thumbs.db

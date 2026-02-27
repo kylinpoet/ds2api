@@ -19,11 +19,8 @@ func TestParseToolCalls(t *testing.T) {
 func TestParseToolCallsFromFencedJSON(t *testing.T) {
 	text := "I will call tools now\n```json\n{\"tool_calls\":[{\"name\":\"search\",\"input\":{\"q\":\"news\"}}]}\n```"
 	calls := ParseToolCalls(text, []string{"search"})
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
-	}
-	if calls[0].Input["q"] != "news" {
-		t.Fatalf("unexpected args: %#v", calls[0].Input)
+	if len(calls) != 0 {
+		t.Fatalf("expected fenced tool_call example to be ignored, got %#v", calls)
 	}
 }
 
@@ -41,14 +38,39 @@ func TestParseToolCallsWithFunctionArgumentsString(t *testing.T) {
 	}
 }
 
-func TestParseToolCallsKeepsUnknownAsFallback(t *testing.T) {
+func TestParseToolCallsRejectsUnknownToolName(t *testing.T) {
 	text := `{"tool_calls":[{"name":"unknown","input":{}}]}`
 	calls := ParseToolCalls(text, []string{"search"})
-	if len(calls) != 1 {
-		t.Fatalf("expected fallback 1 call, got %d", len(calls))
+	if len(calls) != 0 {
+		t.Fatalf("expected unknown tool to be rejected, got %#v", calls)
 	}
-	if calls[0].Name != "unknown" {
-		t.Fatalf("unexpected name: %s", calls[0].Name)
+}
+
+func TestParseToolCallsDetailedMarksPolicyRejection(t *testing.T) {
+	text := `{"tool_calls":[{"name":"unknown","input":{}}]}`
+	res := ParseToolCallsDetailed(text, []string{"search"})
+	if !res.SawToolCallSyntax {
+		t.Fatalf("expected SawToolCallSyntax=true, got %#v", res)
+	}
+	if !res.RejectedByPolicy {
+		t.Fatalf("expected RejectedByPolicy=true, got %#v", res)
+	}
+	if len(res.Calls) != 0 {
+		t.Fatalf("expected no calls after policy rejection, got %#v", res.Calls)
+	}
+}
+
+func TestParseToolCallsDetailedRejectsWhenAllowListEmpty(t *testing.T) {
+	text := `{"tool_calls":[{"name":"search","input":{"q":"go"}}]}`
+	res := ParseToolCallsDetailed(text, nil)
+	if !res.SawToolCallSyntax {
+		t.Fatalf("expected SawToolCallSyntax=true, got %#v", res)
+	}
+	if !res.RejectedByPolicy {
+		t.Fatalf("expected RejectedByPolicy=true, got %#v", res)
+	}
+	if len(res.Calls) != 0 {
+		t.Fatalf("expected no calls when allow-list is empty, got %#v", res.Calls)
 	}
 }
 
@@ -60,5 +82,25 @@ func TestFormatOpenAIToolCalls(t *testing.T) {
 	fn, _ := formatted[0]["function"].(map[string]any)
 	if fn["name"] != "search" {
 		t.Fatalf("unexpected function name: %#v", fn)
+	}
+}
+
+func TestParseStandaloneToolCallsOnlyMatchesStandalonePayload(t *testing.T) {
+	mixed := `这里是示例：{"tool_calls":[{"name":"search","input":{"q":"go"}}]}`
+	if calls := ParseStandaloneToolCalls(mixed, []string{"search"}); len(calls) != 0 {
+		t.Fatalf("expected standalone parser to ignore mixed prose, got %#v", calls)
+	}
+
+	standalone := `{"tool_calls":[{"name":"search","input":{"q":"go"}}]}`
+	calls := ParseStandaloneToolCalls(standalone, []string{"search"})
+	if len(calls) != 1 {
+		t.Fatalf("expected standalone parser to match, got %#v", calls)
+	}
+}
+
+func TestParseStandaloneToolCallsIgnoresFencedCodeBlock(t *testing.T) {
+	fenced := "```json\n{\"tool_calls\":[{\"name\":\"search\",\"input\":{\"q\":\"go\"}}]}\n```"
+	if calls := ParseStandaloneToolCalls(fenced, []string{"search"}); len(calls) != 0 {
+		t.Fatalf("expected fenced tool_call example to be ignored, got %#v", calls)
 	}
 }

@@ -33,6 +33,17 @@ Config source (choose one):
 - **File**: `config.json` (recommended for local/Docker)
 - **Environment variable**: `DS2API_CONFIG_JSON` (recommended for Vercel; supports raw JSON or Base64)
 
+Unified recommendation (best practice):
+
+```bash
+cp config.example.json config.json
+# Edit config.json
+```
+
+Use `config.json` as the single source of truth:
+- Local run: read `config.json` directly
+- Docker / Vercel: generate `DS2API_CONFIG_JSON` (Base64) from `config.json` and inject it
+
 ---
 
 ## 1. Local Run
@@ -99,11 +110,15 @@ go build -o ds2api ./cmd/ds2api
 ### 2.1 Basic Steps
 
 ```bash
-# Copy and edit environment
+# Copy env template
 cp .env.example .env
-# Edit .env, at minimum set:
+
+# Generate single-line Base64 from config.json
+DS2API_CONFIG_JSON="$(base64 < config.json | tr -d '\n')"
+
+# Edit .env and set:
 #   DS2API_ADMIN_KEY=your-admin-key
-#   DS2API_CONFIG_JSON={"keys":[...],"accounts":[...]}
+#   DS2API_CONFIG_JSON=${DS2API_CONFIG_JSON}
 
 # Start
 docker-compose up -d
@@ -120,11 +135,12 @@ docker-compose up -d --build
 
 ### 2.3 Docker Architecture
 
-The `Dockerfile` uses a three-stage build:
+The `Dockerfile` now provides two image paths:
 
-1. **WebUI build stage**: `node:20` image, runs `npm ci && npm run build`
-2. **Go build stage**: `golang:1.24` image, compiles the binary
-3. **Runtime stage**: `debian:bookworm-slim` minimal image
+1. **Default local/dev path (`runtime-from-source`)**: a three-stage build (WebUI build + Go build + runtime).
+2. **Release path (`runtime-from-dist`)**: CI first creates `dist/ds2api_<tag>_linux_<arch>.tar.gz`, then Docker directly reuses the binary and `static/admin` assets from those release archives, without running `npm build`/`go build` again.
+
+The release path keeps Docker images aligned with release archives and reduces duplicate build work.
 
 Container entry command: `/usr/local/bin/ds2api`, default exposed port: `5001`.
 
@@ -145,7 +161,7 @@ Docker Compose includes a built-in health check:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-5001}/healthz"]
+  test: ["CMD", "/usr/local/bin/busybox", "wget", "-qO-", "http://localhost:${PORT:-5001}/healthz"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -167,14 +183,48 @@ If container logs look normal but the admin panel is unreachable, check these fi
 
 1. **Fork** the repo to your GitHub account
 2. **Import** the project on Vercel
-3. **Set environment variables** (at minimum):
+3. **Set environment variables** (minimum required: one variable):
 
    | Variable | Description |
    | --- | --- |
    | `DS2API_ADMIN_KEY` | Admin key (required) |
-   | `DS2API_CONFIG_JSON` | Config content, raw JSON or Base64 (required) |
+   | `DS2API_CONFIG_JSON` | Config content, raw JSON or Base64 (optional, recommended) |
 
 4. **Deploy**
+
+### 3.1.1 Recommended Input (avoid `DS2API_CONFIG_JSON` mistakes)
+
+If you prefer faster one-click bootstrap, you can leave `DS2API_CONFIG_JSON` empty first, then open `/admin` after deployment, import config, and sync it back to Vercel env vars from the "Vercel Sync" page.
+
+Recommended: in repo root, copy the template first and fill your real accounts:
+
+```bash
+cp config.example.json config.json
+# Edit config.json
+```
+
+Do not hand-edit large JSON directly in Vercel. Generate Base64 locally and paste it:
+
+```bash
+# Run in repo root
+DS2API_CONFIG_JSON="$(base64 < config.json | tr -d '\n')"
+echo "$DS2API_CONFIG_JSON"
+```
+
+If you choose to preconfigure before first deploy, set these vars in Vercel Project Settings -> Environment Variables:
+
+```text
+DS2API_ADMIN_KEY=replace-with-a-strong-secret
+DS2API_CONFIG_JSON=<the single-line Base64 output above>
+```
+
+Optional but recommended (for WebUI one-click Vercel sync):
+
+```text
+VERCEL_TOKEN=your-vercel-token
+VERCEL_PROJECT_ID=prj_xxxxxxxxxxxx
+VERCEL_TEAM_ID=team_xxxxxxxxxxxx   # optional for personal accounts
+```
 
 ### 3.2 Optional Environment Variables
 
@@ -184,6 +234,8 @@ If container logs look normal but the admin panel is unreachable, check these fi
 | `DS2API_ACCOUNT_CONCURRENCY` | Alias (legacy compat) | — |
 | `DS2API_ACCOUNT_MAX_QUEUE` | Waiting queue limit | `recommended_concurrency` |
 | `DS2API_ACCOUNT_QUEUE_SIZE` | Alias (legacy compat) | — |
+| `DS2API_GLOBAL_MAX_INFLIGHT` | Global inflight limit | `recommended_concurrency` |
+| `DS2API_MAX_INFLIGHT` | Alias (legacy compat) | — |
 | `DS2API_VERCEL_INTERNAL_SECRET` | Hybrid streaming internal auth | Falls back to `DS2API_ADMIN_KEY` |
 | `DS2API_VERCEL_STREAM_LEASE_TTL_SECONDS` | Stream lease TTL | `900` |
 | `VERCEL_TOKEN` | Vercel sync token | — |
@@ -290,6 +342,7 @@ Built-in GitHub Actions workflow: `.github/workflows/release-artifacts.yml`
 
 - **Trigger**: only on Release `published` (no build on normal push)
 - **Outputs**: multi-platform binary archives + `sha256sums.txt`
+- **Container publishing**: GHCR only (`ghcr.io/cjackhwang/ds2api`)
 
 | Platform | Architecture | Format |
 | --- | --- | --- |
@@ -310,8 +363,8 @@ Each archive includes:
 ```bash
 # 1. Download the archive for your platform
 # 2. Extract
-tar -xzf ds2api_v1.7.0_linux_amd64.tar.gz
-cd ds2api_v1.7.0_linux_amd64
+tar -xzf ds2api_<tag>_linux_amd64.tar.gz
+cd ds2api_<tag>_linux_amd64
 
 # 3. Configure
 cp config.example.json config.json
@@ -323,9 +376,19 @@ cp config.example.json config.json
 
 ### Maintainer Release Flow
 
-1. Create and publish a GitHub Release (with tag, e.g. `v1.7.0`)
+1. Create and publish a GitHub Release (with tag, for example `vX.Y.Z`)
 2. Wait for the `Release Artifacts` workflow to complete
 3. Download the matching archive from Release Assets
+
+### Pull from GHCR (Optional)
+
+```bash
+# latest
+docker pull ghcr.io/cjackhwang/ds2api:latest
+
+# specific version (example)
+docker pull ghcr.io/cjackhwang/ds2api:v2.1.2
+```
 
 ---
 
@@ -469,7 +532,7 @@ curl http://127.0.0.1:5001/v1/chat/completions \
 Run the full live testsuite before release (real account tests):
 
 ```bash
-./scripts/testsuite/run-live.sh
+./tests/scripts/run-live.sh
 ```
 
 With custom flags:

@@ -8,8 +8,10 @@ DS2API 提供两个层级的测试：
 
 | 层级 | 命令 | 说明 |
 | --- | --- | --- |
-| 单元测试 | `go test ./...` | 不需要真实账号 |
-| 端到端测试 | `./scripts/testsuite/run-live.sh` | 使用真实账号执行全链路测试 |
+| 单元测试（Go） | `./tests/scripts/run-unit-go.sh` | 不需要真实账号 |
+| 单元测试（Node） | `./tests/scripts/run-unit-node.sh` | 不需要真实账号 |
+| 单元测试（全部） | `./tests/scripts/run-unit-all.sh` | 不需要真实账号 |
+| 端到端测试 | `./tests/scripts/run-live.sh` | 使用真实账号执行全链路测试 |
 
 端到端测试集会录制完整的请求/响应日志，用于故障排查。
 
@@ -20,26 +22,36 @@ DS2API 提供两个层级的测试：
 ### 单元测试 | Unit Tests
 
 ```bash
-go test ./...
+./tests/scripts/run-unit-all.sh
 ```
 
 ```bash
-node --test api/helpers/stream-tool-sieve.test.js api/chat-stream.test.js
+# 或按语言拆分执行
+./tests/scripts/run-unit-go.sh
+./tests/scripts/run-unit-node.sh
+```
+
+```bash
+# 结构与流程门禁
+./tests/scripts/check-refactor-line-gate.sh
+./tests/scripts/check-node-split-syntax.sh
+
+# 发布阻断：阶段 6 手工烟测签字检查（默认读取 plans/stage6-manual-smoke.md）
+./tests/scripts/check-stage6-manual-smoke.sh
 ```
 
 ### 端到端测试 | End-to-End Tests
 
 ```bash
-./scripts/testsuite/run-live.sh
+./tests/scripts/run-live.sh
 ```
 
 **默认行为**：
 
 1. **Preflight 检查**：
    - `go test ./... -count=1`（单元测试）
-   - `node --check api/chat-stream.js`（语法检查）
-   - `node --check api/helpers/stream-tool-sieve.js`（语法检查）
-   - `node --test api/helpers/stream-tool-sieve.test.js api/chat-stream.test.js`（Node 流式拦截单测）
+   - `./tests/scripts/check-node-split-syntax.sh`（Node 拆分模块语法门禁）
+   - `node --test api/helpers/stream-tool-sieve.test.js api/chat-stream.test.js api/compat/js_compat_test.js`（Node 流式拦截 + compat 单测）
    - `npm run build --prefix webui`（WebUI 构建检查）
 
 2. **隔离启动**：复制 `config.json` 到临时目录，启动独立服务进程
@@ -179,7 +191,7 @@ go run ./cmd/ds2api-tests \
 
 ```bash
 # 确保 config.json 存在且包含有效测试账号
-./scripts/testsuite/run-live.sh
+./tests/scripts/run-live.sh
 exit_code=$?
 if [ $exit_code -ne 0 ]; then
   echo "Tests failed! Check artifacts for details."
