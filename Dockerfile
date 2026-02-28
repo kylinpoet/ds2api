@@ -1,33 +1,61 @@
-# DS2API Docker 镜像
-# 采用极简、零侵入设计，所有配置通过环境变量传递
-# 主代码更新时只需重新构建镜像，无需修改 Dockerfile
-
 FROM node:20 AS webui-builder
 
 WORKDIR /app/webui
-
 COPY webui/package.json webui/package-lock.json ./
 RUN npm ci
-
 COPY webui ./
 RUN npm run build
 
-FROM python:3.11-slim
-
+FROM golang:1.24 AS go-builder
 WORKDIR /app
-
-# 安装依赖（利用 Docker 缓存层）
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 复制整个项目（保留原始目录结构）
+ARG TARGETOS
+ARG TARGETARCH
+COPY go.mod go.sum* ./
+RUN go mod download
 COPY . .
+RUN set -eux; \
+    GOOS="${TARGETOS:-$(go env GOOS)}"; \
+    GOARCH="${TARGETARCH:-$(go env GOARCH)}"; \
+    CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -o /out/ds2api ./cmd/ds2api
 
-# 拷贝 WebUI 构建产物（非 Vercel / Docker 部署可直接使用）
+FROM busybox:1.36.1-musl AS busybox-tools
+
+FROM debian:bookworm-slim AS runtime-base
+WORKDIR /app
+COPY --from=go-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=busybox-tools /bin/busybox /usr/local/bin/busybox
+EXPOSE 5001
+CMD ["/usr/local/bin/ds2api"]
+
+FROM runtime-base AS runtime-from-source
+COPY --from=go-builder /out/ds2api /usr/local/bin/ds2api
+COPY --from=go-builder /app/sha3_wasm_bg.7b9ca65ddd.wasm /app/sha3_wasm_bg.7b9ca65ddd.wasm
+COPY --from=go-builder /app/config.example.json /app/config.example.json
 COPY --from=webui-builder /app/static/admin /app/static/admin
 
-# 暴露服务端口
-EXPOSE 5001
+FROM busybox-tools AS dist-extract
+ARG TARGETARCH
+COPY dist/docker-input/linux_amd64.tar.gz /tmp/ds2api_linux_amd64.tar.gz
+COPY dist/docker-input/linux_arm64.tar.gz /tmp/ds2api_linux_arm64.tar.gz
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) ARCHIVE="/tmp/ds2api_linux_amd64.tar.gz" ;; \
+      arm64) ARCHIVE="/tmp/ds2api_linux_arm64.tar.gz" ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    tar -xzf "${ARCHIVE}" -C /tmp; \
+    PKG_DIR="$(find /tmp -maxdepth 1 -type d -name "ds2api_*_linux_${TARGETARCH}" | head -n1)"; \
+    test -n "${PKG_DIR}"; \
+    mkdir -p /out/static; \
+    cp "${PKG_DIR}/ds2api" /out/ds2api; \
+    cp "${PKG_DIR}/sha3_wasm_bg.7b9ca65ddd.wasm" /out/sha3_wasm_bg.7b9ca65ddd.wasm; \
+    cp "${PKG_DIR}/config.example.json" /out/config.example.json; \
+    cp -R "${PKG_DIR}/static/admin" /out/static/admin
 
-# 启动命令（依赖项目自身的启动逻辑）
-CMD ["python", "app.py"]
+FROM runtime-base AS runtime-from-dist
+COPY --from=dist-extract /out/ds2api /usr/local/bin/ds2api
+COPY --from=dist-extract /out/sha3_wasm_bg.7b9ca65ddd.wasm /app/sha3_wasm_bg.7b9ca65ddd.wasm
+COPY --from=dist-extract /out/config.example.json /app/config.example.json
+COPY --from=dist-extract /out/static/admin /app/static/admin
+
+FROM runtime-from-source AS final

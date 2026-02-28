@@ -2,93 +2,141 @@
 
 Language: [中文](CONTRIBUTING.md) | [English](CONTRIBUTING.en.md)
 
-Thank you for contributing to DS2API!
+Thanks for your interest in contributing to DS2API!
 
 ## Development Setup
 
-### Backend
+### Prerequisites
+
+- Go 1.24+
+- Node.js 20+ (for WebUI development)
+- npm (bundled with Node.js)
+
+### Backend Development
 
 ```bash
-# 1. Clone the repo
+# 1. Clone
 git clone https://github.com/CJackHwang/ds2api.git
 cd ds2api
 
-# 2. Create a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure
+# 2. Configure
 cp config.example.json config.json
-# Edit config.json
+# Edit config.json with test accounts
 
-# 5. Run
-python dev.py
+# 3. Run backend
+go run ./cmd/ds2api
+# Default: http://localhost:5001
 ```
 
-### Frontend (WebUI)
+### Frontend Development (WebUI)
 
 ```bash
+# 1. Navigate to WebUI directory
 cd webui
+
+# 2. Install dependencies
 npm install
+
+# 3. Start dev server (hot reload)
 npm run dev
+# Default: http://localhost:5173, auto-proxies API to backend
 ```
 
-WebUI language packs live in `webui/src/locales/`. Add new locale JSON files there.
+WebUI tech stack:
+- React + Vite
+- Tailwind CSS
+- Bilingual language packs: `webui/src/locales/zh.json` / `en.json`
+
+### Docker Development
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
 
 ## Code Standards
 
-- **Python**: Follow PEP 8, use 4-space indentation
-- **JavaScript/React**: Use 4-space indentation and function components
-- **Commit messages**: Use semantic prefixes (e.g. `feat:`, `fix:`, `docs:`)
+| Language | Standards |
+| --- | --- |
+| **Go** | Run `gofmt` and ensure `go test ./...` passes before committing |
+| **JavaScript/React** | Follow existing project style (functional components) |
+| **Commit messages** | Use semantic prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `style:`, `perf:`, `chore:` |
 
 ## Submitting a PR
 
-1. Fork this repo
-2. Create a feature branch (`git checkout -b feature/xxx`)
-3. Commit your changes (`git commit -m 'feat: add xxx'`)
-4. Push your branch (`git push origin feature/xxx`)
+1. Fork the repo
+2. Create a branch (e.g. `feature/xxx` or `fix/xxx`)
+3. Commit changes
+4. Push your branch
 5. Open a Pull Request
 
-## WebUI Build
+> 💡 If you modify files under `webui/`, no manual build is needed — CI handles it automatically.
 
-> **Important**: After modifying `webui/`, **no manual build is required**.
+## Build WebUI
 
-When a PR is merged into `main`, GitHub Actions will automatically:
-1. Build the WebUI
-2. Commit build artifacts to `static/admin/`
+Manually build WebUI to `static/admin/`:
 
-If you need a local build (for testing):
 ```bash
 ./scripts/build-webui.sh
 ```
 
+## Running Tests
+
+```bash
+# Go + Node unit tests (recommended)
+./tests/scripts/run-unit-all.sh
+
+# End-to-end live tests (real accounts)
+./tests/scripts/run-live.sh
+```
+
 ## Project Structure
 
-```
+```text
 ds2api/
-├── app.py              # FastAPI entrypoint
-├── dev.py              # Development server
-├── core/               # Core modules
-│   ├── auth.py         # Account auth & rotation
-│   ├── config.py       # Configuration management
-│   ├── deepseek.py     # DeepSeek API calls
-│   ├── models.py       # Model definitions
-│   ├── pow.py          # PoW calculations
-│   └── sse_parser.py   # SSE parsing
-├── routes/             # API routes
-│   ├── openai.py       # OpenAI-compatible endpoints
-│   ├── claude.py       # Claude-compatible endpoints
-│   ├── home.py         # Landing page routes
-│   └── admin/          # Admin endpoints
-├── webui/              # React WebUI source
-├── static/admin/       # WebUI build output (auto-generated)
-└── scripts/            # Helper scripts
+├── cmd/
+│   ├── ds2api/              # Local/container entrypoint
+│   └── ds2api-tests/        # End-to-end testsuite entrypoint
+├── api/
+│   ├── index.go             # Vercel Serverless Go entry
+│   ├── chat-stream.js       # Vercel Node.js stream relay
+│   └── helpers/             # Node.js helper modules
+├── internal/
+│   ├── account/             # Account pool and concurrency queue
+│   ├── adapter/
+│   │   ├── openai/          # OpenAI adapter
+│   │   ├── claude/          # Claude adapter
+│   │   └── gemini/          # Gemini adapter
+│   ├── admin/               # Admin API handlers
+│   ├── auth/                # Auth and JWT
+│   ├── claudeconv/          # Claude message conversion
+│   ├── compat/              # Compatibility helpers
+│   ├── config/              # Config loading and hot-reload
+│   ├── deepseek/            # DeepSeek client, PoW WASM
+│   ├── devcapture/          # Dev packet capture
+│   ├── format/              # Output formatting
+│   ├── prompt/              # Prompt building
+│   ├── server/              # HTTP routing (chi router)
+│   ├── sse/                 # SSE parsing utilities
+│   ├── stream/              # Unified stream consumption engine
+│   ├── testsuite/           # Testsuite core logic
+│   ├── util/                # Common utilities
+│   └── webui/               # WebUI static hosting
+├── webui/                   # React WebUI source
+│   └── src/
+│       ├── components/      # Components
+│       └── locales/         # Language packs
+├── scripts/                 # Build and test scripts
+├── static/admin/            # WebUI build output (not committed)
+├── Dockerfile               # Multi-stage build
+├── docker-compose.yml       # Production
+├── docker-compose.dev.yml   # Development
+└── vercel.json              # Vercel config
 ```
 
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/CJackHwang/ds2api/issues)
-- Provide detailed reproduction steps and logs
+Please use [GitHub Issues](https://github.com/CJackHwang/ds2api/issues) and include:
+
+- Steps to reproduce
+- Relevant log output
+- Environment info (OS, Go version, deployment method)

@@ -2,409 +2,567 @@
 
 语言 / Language: [中文](DEPLOY.md) | [English](DEPLOY.en.md)
 
-本文档详细介绍 DS2API 的各种部署方式。
+本指南基于当前 Go 代码库，详细说明各种部署方式。
 
 ---
 
 ## 目录
 
-- [Vercel 部署（推荐）](#vercel-部署推荐)
-- [Docker 部署（推荐）](#docker-部署推荐)
-- [本地开发](#本地开发)
-- [生产环境部署](#生产环境部署)
-- [常见问题](#常见问题)
+- [前置要求](#0-前置要求)
+- [一、本地运行](#一本地运行)
+- [二、Docker 部署](#二docker-部署)
+- [三、Vercel 部署](#三vercel-部署)
+- [四、下载 Release 构建包](#四下载-release-构建包)
+- [五、反向代理（Nginx）](#五反向代理nginx)
+- [六、Linux systemd 服务化](#六linux-systemd-服务化)
+- [七、部署后检查](#七部署后检查)
+- [八、发布前进行本地回归](#八发布前进行本地回归)
 
 ---
 
-## Vercel 部署（推荐）
+## 0. 前置要求
 
-### 一键部署
+| 依赖 | 最低版本 | 说明 |
+| --- | --- | --- |
+| Go | 1.24+ | 编译后端 |
+| Node.js | 20+ | 仅在需要本地构建 WebUI 时 |
+| npm | 随 Node.js 提供 | 安装 WebUI 依赖 |
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api&env=DS2API_ADMIN_KEY&envDescription=管理面板访问密码（必填）&envLink=https%3A%2F%2Fgithub.com%2FCJackHwang%2Fds2api%23环境变量&project-name=ds2api&repository-name=ds2api)
+配置来源（任选其一）：
 
-### 部署步骤
+- **文件方式**：`config.json`（推荐本地/Docker 使用）
+- **环境变量方式**：`DS2API_CONFIG_JSON`（推荐 Vercel 使用，支持 JSON 字符串或 Base64 编码）
 
-1. **点击部署按钮**
-   - 登录你的 GitHub 账号
-   - 授权 Vercel 访问
-
-2. **设置环境变量**
-   - `DS2API_ADMIN_KEY`: 管理面板密码（**必填**）
-
-3. **等待部署完成**
-   - Vercel 会自动构建并部署项目
-   - 部署完成后获得访问 URL
-
-4. **配置账号**
-   - 访问 `https://your-project.vercel.app/admin`
-   - 输入管理密码登录
-   - 添加 DeepSeek 账号
-   - 设置自定义 API Key
-
-5. **同步配置**
-   - 点击「同步到 Vercel」按钮
-   - 首次需要输入 Vercel Token 和 Project ID
-   - 同步成功后配置会持久化
-
-### 获取 Vercel 凭证
-
-**Vercel Token**:
-1. 访问 https://vercel.com/account/tokens
-2. 点击 "Create Token"
-3. 设置名称和有效期
-4. 复制生成的 Token
-
-**Project ID**:
-1. 进入 Vercel 项目页面
-2. 点击 Settings -> General
-3. 复制 "Project ID"
-
----
-
-## 本地开发
-
-### 环境要求
-
-- Python 3.9+
-- Node.js 18+ (WebUI 开发)
-- pip
-
-### 快速开始
+统一建议（最优实践）：
 
 ```bash
-# 1. 克隆项目
+cp config.example.json config.json
+# 编辑 config.json
+```
+
+建议把 `config.json` 作为唯一配置源：
+- 本地运行：直接读 `config.json`
+- Docker / Vercel：从 `config.json` 生成 `DS2API_CONFIG_JSON`（Base64）注入环境变量
+
+---
+
+## 一、本地运行
+
+### 1.1 基本步骤
+
+```bash
+# 克隆仓库
 git clone https://github.com/CJackHwang/ds2api.git
 cd ds2api
 
-# 2. 安装 Python 依赖
-pip install -r requirements.txt
-
-# 3. 配置账号
+# 复制并编辑配置
 cp config.example.json config.json
-# 编辑 config.json，填入 DeepSeek 账号信息
+# 使用你喜欢的编辑器打开 config.json，填入：
+#   - keys: 你的 API 访问密钥
+#   - accounts: DeepSeek 账号（email 或 mobile + password）
 
-# 4. 启动服务
-python dev.py
+# 启动服务
+go run ./cmd/ds2api
 ```
 
-### 配置文件示例
+默认监听 `http://0.0.0.0:5001`，可通过 `PORT` 环境变量覆盖。
 
-```json
-{
-  "keys": ["my-api-key-1", "my-api-key-2"],
-  "accounts": [
-    {
-      "email": "your-email@example.com",
-      "password": "your-password",
-      "token": ""
-    },
-    {
-      "mobile": "12345678901",
-      "password": "your-password",
-      "token": ""
-    }
-  ]
-}
-```
+### 1.2 WebUI 构建
 
-**说明**：
-- `keys`: 自定义 API Key，用于调用本服务的接口
-- `accounts`: DeepSeek 网页版账号
-  - 支持 `email` 或 `mobile` 登录
-  - `token` 留空，系统会自动获取
+本地首次启动时，若 `static/admin/` 不存在，服务会自动尝试构建 WebUI（需要 Node.js/npm）。
 
-### WebUI 开发
+你也可以手动构建：
 
 ```bash
-# 进入 WebUI 目录
-cd webui
-
-# 安装依赖
-npm install
-
-# 启动开发服务器
-npm run dev
-```
-
-WebUI 开发服务器会启动在 `http://localhost:5173`，并自动代理 API 请求到后端 `http://localhost:5001`。
-
-### WebUI 构建
-
-WebUI 构建产物位于 `static/admin/` 目录。
-
-**自动构建（推荐）**：
-- 当前由 Vercel 在部署时执行 WebUI 构建（见 `vercel.json` 的 `buildCommand`）
-- GitHub Actions 的 WebUI 自动构建流程已关闭
-- `static/admin/` 构建产物不再提交到仓库
-
-**手动构建**：
-```bash
-# 方式1：使用脚本
 ./scripts/build-webui.sh
+```
 
-# 方式2：直接执行
+或手动执行：
+
+```bash
 cd webui
 npm install
 npm run build
+# 产物输出到 static/admin/
 ```
 
-> **贡献者注意**：修改 WebUI 后无需手动构建，Vercel 部署会自动构建。
+通过环境变量控制自动构建行为：
+
+```bash
+# 强制关闭自动构建
+DS2API_AUTO_BUILD_WEBUI=false go run ./cmd/ds2api
+
+# 强制开启自动构建
+DS2API_AUTO_BUILD_WEBUI=true go run ./cmd/ds2api
+```
+
+### 1.3 编译为二进制文件
+
+```bash
+go build -o ds2api ./cmd/ds2api
+./ds2api
+```
 
 ---
 
-## Docker 部署（推荐）
+## 二、Docker 部署
 
-Docker 部署采用**零侵入、解耦设计**：
-- Dockerfile 仅执行标准 Python 项目操作，不硬编码任何项目特定配置
-- 构建镜像时会一并构建 WebUI（便于非 Vercel 部署直接访问管理面板）
-- 所有配置通过环境变量和 `.env` 文件管理
-- **主代码更新时只需重新构建镜像，无需修改 Docker 配置**
-
-### 快速开始（Docker Compose）
+### 2.1 基本步骤
 
 ```bash
-# 1. 复制环境变量模板
+# 复制环境变量模板
 cp .env.example .env
-# 编辑 .env，填写 DS2API_ADMIN_KEY 和 DS2API_CONFIG_JSON
 
-# 2. 启动服务
+# 从 config.json 生成单行 Base64
+DS2API_CONFIG_JSON="$(base64 < config.json | tr -d '\n')"
+
+# 编辑 .env（请改成你的强密码），设置：
+#   DS2API_ADMIN_KEY=your-admin-key
+#   DS2API_CONFIG_JSON=${DS2API_CONFIG_JSON}
+
+# 启动
 docker-compose up -d
 
-# 3. 查看日志
+# 查看日志
 docker-compose logs -f
+```
 
-# 4. 主代码更新后重新构建
+### 2.2 更新
+
+```bash
 docker-compose up -d --build
 ```
 
-### 配置文件挂载方式
+### 2.3 Docker 架构说明
 
-如需使用 `config.json` 而非环境变量：
+`Dockerfile` 提供两条构建路径：
 
-```yaml
-# docker-compose.yml
-services:
-  ds2api:
-    build: .
-    ports:
-      - "5001:5001"
-    environment:
-      - DS2API_ADMIN_KEY=your-admin-key
-    volumes:
-      - ./config.json:/app/config.json:ro
-    restart: unless-stopped
-```
+1. **本地/开发默认路径（`runtime-from-source`）**：三阶段构建（WebUI 构建 + Go 构建 + 运行阶段）。
+2. **Release 路径（`runtime-from-dist`）**：CI 先生成 `dist/ds2api_<tag>_linux_<arch>.tar.gz`，再由 Docker 直接复用该发布包内的二进制和 `static/admin` 产物组装运行镜像，不再重复执行 `npm build`/`go build`。
 
-### Docker 命令行部署
+Release 路径可确保 Docker 镜像与 release 压缩包使用同一套产物，减少重复构建带来的差异。
+
+容器内启动命令：`/usr/local/bin/ds2api`，默认暴露端口 `5001`。
+
+### 2.4 开发环境
 
 ```bash
-# 构建镜像
-docker build -t ds2api:latest .
-
-# 使用环境变量运行
-docker run -d \
-  --name ds2api \
-  -p 5001:5001 \
-  -e DS2API_ADMIN_KEY=your-admin-key \
-  -e DS2API_CONFIG_JSON='{"keys":["api-key"],"accounts":[...]}' \
-  --restart unless-stopped \
-  ds2api:latest
-
-# 或使用配置文件挂载
-docker run -d \
-  --name ds2api \
-  -p 5001:5001 \
-  -e DS2API_ADMIN_KEY=your-admin-key \
-  -v $(pwd)/config.json:/app/config.json:ro \
-  --restart unless-stopped \
-  ds2api:latest
-```
-
-### 开发模式（热重载）
-
-```bash
-# 使用开发配置启动，代码修改实时生效
 docker-compose -f docker-compose.dev.yml up
 ```
 
 开发模式特性：
-- 源代码挂载到容器，修改即时生效
-- 日志级别设为 DEBUG
-- 自动读取本地 `config.json`
+- 源代码挂载（修改即生效）
+- `LOG_LEVEL=DEBUG`
+- 不自动重启
 
-### 维护命令
+### 2.5 健康检查
+
+Docker Compose 已配置内置健康检查：
+
+```yaml
+healthcheck:
+  test: ["CMD", "/usr/local/bin/busybox", "wget", "-qO-", "http://localhost:${PORT:-5001}/healthz"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+```
+
+### 2.6 Docker 常见排查
+
+如果容器日志正常但面板打不开，优先检查：
+
+1. **端口是否一致**：`PORT` 改成非 `5001` 时，访问地址也要改成对应端口（如 `http://localhost:8080/admin`）。
+2. **开发 compose 的 WebUI 静态文件**：`docker-compose.dev.yml` 使用 `go run` 开发镜像，不会在容器内自动安装 Node.js；若仓库里没有 `static/admin`，`/admin` 会返回 404。可先在宿主机构建一次：`./scripts/build-webui.sh`。
+
+### 2.7 Zeabur 一键部署（Dockerfile）
+
+仓库提供 `zeabur.yaml` 模板，可在 Zeabur 上一键部署：
+
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/L4CFHP)
+
+部署要点：
+
+- **端口**：服务默认监听 `5001`，模板会固定设置 `PORT=5001`。
+- **配置持久化**：模板挂载卷 `/data`，并设置 `DS2API_CONFIG_PATH=/data/config.json`；在管理台导入配置后，会写入并持久化到该路径。
+- **首次登录**：部署完成后访问 `/admin`，使用 Zeabur 环境变量/模板指引中的 `DS2API_ADMIN_KEY` 登录（建议首次登录后自行更换为强密码）。
+
+---
+
+## 三、Vercel 部署
+
+### 3.1 部署步骤
+
+1. **Fork 仓库**到你的 GitHub 账号
+2. **在 Vercel 上导入项目**
+3. **配置环境变量**（最少只需设置以下一项）：
+
+   | 变量 | 说明 |
+   | --- | --- |
+   | `DS2API_ADMIN_KEY` | 管理密钥（必填） |
+   | `DS2API_CONFIG_JSON` | 配置内容，JSON 字符串或 Base64 编码（可选，建议） |
+
+4. **部署**
+
+### 3.1.1 推荐填写方式（避免 `DS2API_CONFIG_JSON` 填错）
+
+如果你想先完成一键部署，也可以先不填 `DS2API_CONFIG_JSON`，部署后进入 `/admin` 导入配置，再在「Vercel 同步」里写回环境变量。
+
+建议先在仓库目录复制示例配置，再按实际账号填写：
 
 ```bash
-# 查看容器状态
-docker-compose ps
+cp config.example.json config.json
+# 编辑 config.json
+```
 
-# 查看日志
-docker-compose logs -f ds2api
+不要在 Vercel 面板里手写复杂 JSON，建议本地生成 Base64 后粘贴：
 
-# 重启服务
-docker-compose restart
+```bash
+# 在仓库根目录执行
+DS2API_CONFIG_JSON="$(base64 < config.json | tr -d '\n')"
+echo "$DS2API_CONFIG_JSON"
+```
 
-# 停止服务
-docker-compose down
+如果你选择在部署前就预置配置，请在 Vercel Project Settings -> Environment Variables 配置：
 
-# 完全重建（清除缓存）
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+```text
+DS2API_ADMIN_KEY=请替换为强密码
+DS2API_CONFIG_JSON=上一步生成的一整行 Base64
+```
+
+可选但推荐（用于 WebUI 一键同步 Vercel 配置）：
+
+```text
+VERCEL_TOKEN=你的 Vercel Token
+VERCEL_PROJECT_ID=prj_xxxxxxxxxxxx
+VERCEL_TEAM_ID=team_xxxxxxxxxxxx   # 个人账号可留空
+```
+
+### 3.2 可选环境变量
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `DS2API_ACCOUNT_MAX_INFLIGHT` | 每账号并发上限 | `2` |
+| `DS2API_ACCOUNT_CONCURRENCY` | 同上（兼容别名） | — |
+| `DS2API_ACCOUNT_MAX_QUEUE` | 等待队列上限 | `recommended_concurrency` |
+| `DS2API_ACCOUNT_QUEUE_SIZE` | 同上（兼容别名） | — |
+| `DS2API_GLOBAL_MAX_INFLIGHT` | 全局并发上限 | `recommended_concurrency` |
+| `DS2API_MAX_INFLIGHT` | 同上（兼容别名） | — |
+| `DS2API_VERCEL_INTERNAL_SECRET` | 混合流式内部鉴权 | 回退用 `DS2API_ADMIN_KEY` |
+| `DS2API_VERCEL_STREAM_LEASE_TTL_SECONDS` | 流式 lease TTL | `900` |
+| `VERCEL_TOKEN` | Vercel 同步 token | — |
+| `VERCEL_PROJECT_ID` | Vercel 项目 ID | — |
+| `VERCEL_TEAM_ID` | Vercel 团队 ID | — |
+| `DS2API_VERCEL_PROTECTION_BYPASS` | 部署保护绕过密钥（内部 Node→Go 调用） | — |
+
+### 3.3 Vercel 架构说明
+
+```text
+请求 ─────┐
+          │
+          ▼
+     vercel.json 路由规则
+          │
+    ┌─────┴─────┐
+    │           │
+    ▼           ▼
+api/index.go  api/chat-stream.js
+(Go Runtime)  (Node Runtime)
+```
+
+- **入口文件**：`api/index.go`（Serverless Go）
+- **流式入口**：`api/chat-stream.js`（Node Runtime，保证实时 SSE）
+- **路由重写**：`vercel.json`
+- **构建命令**：`npm ci --prefix webui && npm run build --prefix webui`（自动执行）
+
+#### 流式处理链路
+
+由于 Vercel Go Runtime 存在平台层响应缓冲，本项目在 Vercel 上采用"**Go prepare + Node stream**"的混合链路：
+
+1. `api/chat-stream.js` 收到 `/v1/chat/completions` 请求
+2. Node 调用 Go 内部 prepare 接口（`?__stream_prepare=1`），获取会话 ID、PoW、token 等
+3. Go prepare 创建 stream lease，锁定账号
+4. Node 直连 DeepSeek 上游，实时流式转发 SSE 给客户端（含 OpenAI chunk 封装与 tools 防泄漏筛分）
+5. 流结束后 Node 调用 Go release 接口（`?__stream_release=1`），释放账号
+
+> 该适配**仅在 Vercel 环境生效**；本地与 Docker 仍走纯 Go 链路。
+
+#### 非流式回退与 Tool Call 处理
+
+- `api/chat-stream.js` 仅对非流式请求回退到 Go 入口（`?__go=1`）
+- 流式请求（包括带 `tools`）走 Node 路径，并执行与 Go 对齐的 tool-call 防泄漏处理
+- WebUI 的"非流式测试"直接请求 `?__go=1`，避免 Node 中转造成长请求超时
+
+#### 函数时长
+
+`vercel.json` 已将 `api/chat-stream.js` 与 `api/index.go` 的 `maxDuration` 设为 `300`（受 Vercel 套餐上限约束）。
+
+### 3.4 Vercel 常见报错排查
+
+#### Go 构建失败
+
+```text
+Error: Command failed: go build -ldflags -s -w -o .../bootstrap ...
+```
+
+**原因**：Vercel 项目的 Go 构建参数配置不正确（`-ldflags` 没有作为一个整体字符串传递）。
+
+**解决**：
+
+1. 进入 Vercel Project Settings → Build and Development Settings
+2. **清空**自定义 Go Build Flags / Build Command（推荐）
+3. 若必须设置 ldflags，使用 `-ldflags="-s -w"`（保证它是一个参数）
+4. 确认仓库 `go.mod` 为受支持版本（当前为 `go 1.24`）
+5. 重新部署（建议清缓存后 Redeploy）
+
+#### Internal 包导入错误
+
+```text
+use of internal package ds2api/internal/server not allowed
+```
+
+**原因**：Vercel Go 入口文件直接 `import internal/...`。
+
+**解决**：当前仓库已通过公开桥接包 `app` 解决：`api/index.go` → `ds2api/app` → `internal/server`。
+
+#### 输出目录错误
+
+```text
+No Output Directory named "public" found after the Build completed.
+```
+
+**解决**：当前仓库使用 `static` 作为输出目录（`vercel.json` 中 `"outputDirectory": "static"`）。若你在项目设置里手动改过 Output Directory，请设为 `static` 或清空让仓库配置生效。
+
+#### 部署保护拦截
+
+如果接口返回 Vercel HTML 页面 `Authentication Required`：
+
+- **方案 A**：关闭该部署/环境的 Deployment Protection（推荐用于公开 API）
+- **方案 B**：请求中添加 `x-vercel-protection-bypass` 头
+- **方案 C**：设置 `VERCEL_AUTOMATION_BYPASS_SECRET`（或 `DS2API_VERCEL_PROTECTION_BYPASS`），仅影响内部 Node→Go 调用
+
+### 3.5 仓库不提交构建产物
+
+- `static/admin` 目录不在 Git 中
+- Vercel / Docker 构建阶段自动生成 WebUI 静态文件
+
+---
+
+## 四、下载 Release 构建包
+
+仓库内置 GitHub Actions 工作流：`.github/workflows/release-artifacts.yml`
+
+- **触发条件**：仅在 Release `published` 时触发（普通 push 不会构建）
+- **构建产物**：多平台二进制压缩包 + `sha256sums.txt`
+- **容器镜像发布**：仅发布到 GHCR（`ghcr.io/cjackhwang/ds2api`）
+
+| 平台 | 架构 | 文件格式 |
+| --- | --- | --- |
+| Linux | amd64, arm64 | `.tar.gz` |
+| macOS | amd64, arm64 | `.tar.gz` |
+| Windows | amd64 | `.zip` |
+
+每个压缩包包含：
+
+- `ds2api` 可执行文件（Windows 为 `ds2api.exe`）
+- `static/admin/`（WebUI 构建产物）
+- `sha3_wasm_bg.7b9ca65ddd.wasm`
+- `config.example.json`、`.env.example`
+- `README.MD`、`README.en.md`、`LICENSE`
+
+### 使用步骤
+
+```bash
+# 1. 下载对应平台的压缩包
+# 2. 解压
+tar -xzf ds2api_<tag>_linux_amd64.tar.gz
+cd ds2api_<tag>_linux_amd64
+
+# 3. 配置
+cp config.example.json config.json
+# 编辑 config.json
+
+# 4. 启动
+./ds2api
+```
+
+### 维护者发布步骤
+
+1. 在 GitHub 创建并发布 Release（带 tag，如 `vX.Y.Z`）
+2. 等待 Actions 工作流 `Release Artifacts` 完成
+3. 在 Release 的 Assets 下载对应平台压缩包
+
+### 拉取 GHCR 镜像（可选）
+
+```bash
+# latest
+docker pull ghcr.io/cjackhwang/ds2api:latest
+
+# 指定版本（示例）
+docker pull ghcr.io/cjackhwang/ds2api:v2.1.2
 ```
 
 ---
 
-## 生产环境部署
+## 五、反向代理（Nginx）
 
-### 使用 systemd (Linux)
+如果在 Nginx 后部署，**必须关闭缓冲**以保证 SSE 流式响应正常工作：
 
-1. **创建服务文件**
-
-```bash
-sudo nano /etc/systemd/system/ds2api.service
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:5001;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    chunked_transfer_encoding on;
+    tcp_nodelay on;
+}
 ```
 
+如果需要 HTTPS，可以在 Nginx 层配置 SSL 证书：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.example.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
+        tcp_nodelay on;
+    }
+}
+```
+
+---
+
+## 六、Linux systemd 服务化
+
+### 6.1 安装
+
+```bash
+# 将编译好的二进制文件和相关文件复制到目标目录
+sudo mkdir -p /opt/ds2api
+sudo cp ds2api config.json sha3_wasm_bg.7b9ca65ddd.wasm /opt/ds2api/
+sudo cp -r static/admin /opt/ds2api/static/admin
+```
+
+### 6.2 创建 systemd 服务文件
+
 ```ini
+# /etc/systemd/system/ds2api.service
+
 [Unit]
-Description=DS2API Service
+Description=DS2API (Go)
 After=network.target
 
 [Service]
 Type=simple
-User=www-data
 WorkingDirectory=/opt/ds2api
-ExecStart=/usr/bin/python3 app.py
-Restart=always
-RestartSec=10
 Environment=PORT=5001
-Environment=DS2API_ADMIN_KEY=your-admin-key
+Environment=DS2API_CONFIG_PATH=/opt/ds2api/config.json
+Environment=DS2API_ADMIN_KEY=your-admin-key-here
+ExecStart=/opt/ds2api/ds2api
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-2. **启动服务**
+### 6.3 常用命令
 
 ```bash
+# 加载服务配置
 sudo systemctl daemon-reload
+
+# 设置开机自启
 sudo systemctl enable ds2api
+
+# 启动服务
 sudo systemctl start ds2api
-```
 
-3. **查看状态**
-
-```bash
+# 查看状态
 sudo systemctl status ds2api
+
+# 查看日志
 sudo journalctl -u ds2api -f
-```
 
-### Nginx 反向代理
-
-```nginx
-server {
-    listen 80;
-    server_name api.yourdomain.com;
-
-    # SSL 配置（推荐）
-    # listen 443 ssl http2;
-    # ssl_certificate /path/to/cert.pem;
-    # ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:5001;
-        proxy_http_version 1.1;
-        
-        # 关闭缓冲，支持 SSE
-        proxy_buffering off;
-        proxy_cache off;
-        
-        # 连接设置
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # SSE 超时设置
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-        
-        # 分块传输
-        chunked_transfer_encoding on;
-        tcp_nopush on;
-        tcp_nodelay on;
-        keepalive_timeout 120;
-    }
-}
-```
-
----
-
-## 常见问题
-
-### Q: 账号验证失败怎么办？
-
-**A**: 检查以下几点：
-1. 确认 DeepSeek 账号密码正确
-2. 检查账号是否被封禁或需要验证
-3. 尝试在浏览器中手动登录一次
-4. 查看日志获取详细错误信息
-
-### Q: 流式响应断开怎么办？
-
-**A**: 
-1. 检查 Nginx/反向代理配置，确保关闭了 `proxy_buffering`
-2. 增加 `proxy_read_timeout` 超时时间
-3. 检查网络连接稳定性
-
-### Q: Vercel 部署后配置丢失？
-
-**A**: 
-1. 确保点击了「同步到 Vercel」按钮
-2. 检查 Vercel Token 是否正确且未过期
-3. 确认 Project ID 正确
-
-### Q: 如何更新到新版本？
-
-**本地部署**:
-```bash
-git pull origin main
-pip install -r requirements.txt
 # 重启服务
+sudo systemctl restart ds2api
+
+# 停止服务
+sudo systemctl stop ds2api
 ```
-
-**Docker 部署**:
-```bash
-# 拉取最新代码
-git pull origin main
-
-# 重新构建并启动（无需修改 Docker 配置）
-docker-compose up -d --build
-```
-
-**Vercel 部署**:
-- 项目会自动从 GitHub 同步更新
-- 或在 Vercel 控制台手动触发重新部署
-
-### Q: 如何查看日志？
-
-**本地开发**:
-```bash
-# 设置日志级别
-export LOG_LEVEL=DEBUG
-python dev.py
-```
-
-**Vercel**:
-- 访问 Vercel 控制台 -> 项目 -> Deployments -> Logs
-
-### Q: Token 计数不准确？
-
-**A**: DS2API 使用估算方式计算 token 数量（字符数 / 4），与 OpenAI 官方的 tokenizer 可能有差异，仅供参考。
 
 ---
 
-## 获取帮助
+## 七、部署后检查
 
-- **GitHub Issues**: https://github.com/CJackHwang/ds2api/issues
-- **文档**: https://github.com/CJackHwang/ds2api
+无论使用哪种部署方式，启动后建议依次检查：
+
+```bash
+# 1. 存活探针
+curl -s http://127.0.0.1:5001/healthz
+# 预期: {"status":"ok"}
+
+# 2. 就绪探针
+curl -s http://127.0.0.1:5001/readyz
+# 预期: {"status":"ready"}
+
+# 3. 模型列表
+curl -s http://127.0.0.1:5001/v1/models
+# 预期: {"object":"list","data":[...]}
+
+# 4. 管理台页面（如果已构建 WebUI）
+curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5001/admin
+# 预期: 200
+
+# 5. 测试 API 调用
+curl http://127.0.0.1:5001/v1/chat/completions \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hello"}]}'
+```
+
+---
+
+## 八、发布前进行本地回归
+
+建议在发布前执行完整的端到端测试集（使用真实账号）：
+
+```bash
+./tests/scripts/run-live.sh
+```
+
+可自定义参数：
+
+```bash
+go run ./cmd/ds2api-tests \
+  --config config.json \
+  --admin-key admin \
+  --out artifacts/testsuite \
+  --timeout 120 \
+  --retries 2
+```
+
+测试集自动执行内容：
+
+- ✅ 语法/构建/单测 preflight
+- ✅ 隔离副本配置启动服务（不污染原始 `config.json`）
+- ✅ 真实调用场景验证（OpenAI/Claude/Admin/并发/toolcall/流式）
+- ✅ 全量请求与响应日志落盘（用于故障复盘）
+
+详细测试集说明参阅 [TESTING.md](TESTING.md)。
